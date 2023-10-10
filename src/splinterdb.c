@@ -13,6 +13,8 @@
  *-----------------------------------------------------------------------------
  */
 
+#include <sys/stat.h>
+
 #include "splinterdb/splinterdb.h"
 #include "platform.h"
 #include "clockcache.h"
@@ -53,6 +55,48 @@ typedef struct splinterdb {
    bool               we_created_heap;
 } splinterdb;
 
+void dump_cache_pages(clockcache *cc) {
+   uint64    i;
+   uint64    disk_addr;
+   uint32    status;
+   page_type pagetype;
+
+   struct stat st = {0};
+   if (stat("/cachepages", &st) == -1) {
+      mkdir("/cachepages", 0777);
+   }
+
+   for (i = 0; i < cc->cfg->page_capacity; i++) {
+      char* logfile;
+      asprintf(&logfile, "/cachepages/%05lu.page", i);
+      platform_log_handle *log_handle = platform_open_log_file(logfile, "w");
+
+      status    = cc->entry[i].status;
+      pagetype  = cc->entry[i].type;
+      disk_addr = cc->entry[i].page.disk_addr;
+      platform_log(log_handle, "status: 0x%02x\n", status);
+      platform_log(log_handle, "page type: %d\n", pagetype);
+      platform_log(log_handle, "disk addr: 0x%016lx\n", disk_addr);
+      fwrite(cc->entry[i].page.data, 1, 4096, log_handle);
+
+      platform_close_log_file(log_handle);
+      platform_free_from_heap(NULL, logfile, NULL, NULL, NULL, 0);
+   }
+
+   return;
+}
+
+void splinterdb_print_cache(splinterdb* kvs) {
+   dump_cache_pages(&kvs->cache_handle);
+
+   platform_log_handle *log_handle = platform_open_log_file("/cachepages/bitmap", "w");
+   kvs->cache_handle.super.ops->print(log_handle, &kvs->cache_handle.super);
+   platform_close_log_file(log_handle);
+
+   log_handle = platform_open_log_file("/cachepages/stats", "w");
+   kvs->cache_handle.super.ops->print_stats(log_handle, &kvs->cache_handle.super);
+   platform_close_log_file(log_handle);
+}
 
 /*
  * Extract errno.h -style status int from a platform_status
