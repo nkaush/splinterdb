@@ -66,22 +66,30 @@ void dump_cache_pages(clockcache *cc) {
       mkdir("/cachepages", 0777);
    }
 
-   for (i = 0; i < cc->cfg->page_capacity; i++) {
-      char* logfile;
-      asprintf(&logfile, "/cachepages/%05lu.page", i);
-      platform_log_handle *log_handle = platform_open_log_file(logfile, "w");
+   const char* mdf = "/cachepages/metadata";
+   platform_log_handle *metadata_handle = platform_open_log_file(mdf, "w");
 
+   for (i = 0; i < cc->cfg->page_capacity; i++) {
       status    = cc->entry[i].status;
       pagetype  = cc->entry[i].type;
       disk_addr = cc->entry[i].page.disk_addr;
-      platform_log(log_handle, "status: 0x%02x\n", status);
-      platform_log(log_handle, "page type: %d\n", pagetype);
-      platform_log(log_handle, "disk addr: 0x%016lx\n", disk_addr);
-      fwrite(cc->entry[i].page.data, 1, 4096, log_handle);
 
+      // Write page metadata to metadata file
+      platform_log(metadata_handle, "page #: %07lu\n", i);
+      platform_log(metadata_handle, "status: 0x%02x\n", status);
+      platform_log(metadata_handle, "page type: %d\n", pagetype);
+      platform_log(metadata_handle, "disk addr: 0x%016lx\n\n", disk_addr);
+
+      // Write page from cache
+      char* logfile;
+      asprintf(&logfile, "/cachepages/%07lu.page", i);
+      platform_log_handle *log_handle = platform_open_log_file(logfile, "w");
+      fwrite(cc->entry[i].page.data, 1, 4096, log_handle);
       platform_close_log_file(log_handle);
-      platform_free_from_heap(NULL, logfile, NULL, NULL, NULL, 0);
+      platform_free(NULL, logfile);
    }
+
+   platform_close_log_file(metadata_handle);
 
    return;
 }
