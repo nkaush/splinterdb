@@ -55,6 +55,8 @@ typedef struct splinterdb {
    bool               we_created_heap;
 } splinterdb;
 
+#define SINGLE_CACHEDUMP_FILE (1)
+
 void dump_cache_pages(clockcache *cc) {
    uint64    i;
    uint64    disk_addr;
@@ -69,6 +71,11 @@ void dump_cache_pages(clockcache *cc) {
    const char* mdf = "/cachepages/metadata";
    platform_log_handle *metadata_handle = platform_open_log_file(mdf, "w");
 
+#if SINGLE_CACHEDUMP_FILE
+   const char* cdf = "/cachepages/dump";
+   platform_log_handle *cachedumpfile = platform_open_log_file(cdf, "w");
+#endif
+
    for (i = 0; i < cc->cfg->page_capacity; i++) {
       status    = cc->entry[i].status;
       pagetype  = cc->entry[i].type;
@@ -81,12 +88,19 @@ void dump_cache_pages(clockcache *cc) {
       platform_log(metadata_handle, "disk addr: 0x%016lx\n\n", disk_addr);
 
       // Write page from cache
+
+#if !SINGLE_CACHEDUMP_FILE
       char* logfile;
       asprintf(&logfile, "/cachepages/%07lu.page", i);
-      platform_log_handle *log_handle = platform_open_log_file(logfile, "w");
-      fwrite(cc->entry[i].page.data, 1, 4096, log_handle);
-      platform_close_log_file(log_handle);
+      platform_log_handle *cachedumpfile = platform_open_log_file(logfile, "w");
       platform_free(NULL, logfile);
+#endif
+
+      fwrite(cc->entry[i].page.data, 1, 4096, cachedumpfile);
+
+#if !SINGLE_CACHEDUMP_FILE
+      platform_close_log_file(cachedumpfile);
+#endif
    }
 
    platform_close_log_file(metadata_handle);
