@@ -59,28 +59,6 @@ typedef struct splinterdb {
 #define SINGLE_CACHEDUMP_FILE (1)
 
 void dump_cache_pages(clockcache *cc) {
-   pid_t pid;
-   if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
-      perror("signal");
-      exit(EXIT_FAILURE);
-   }
-
-   pid = fork();
-   switch (pid) {
-   case -1:
-      perror("fork");
-      exit(EXIT_FAILURE);
-   case 0:
-      puts("Child beginning cachedump...");
-      if ( setsid() == -1 ) {
-         perror("setsid");
-         exit(EXIT_FAILURE);
-      }
-   default:
-      puts("Fork succeeded. Returning from parent.");
-      return;
-   }
-
    uint64    i;
    uint64    disk_addr;
    uint32    status;
@@ -128,10 +106,33 @@ void dump_cache_pages(clockcache *cc) {
 
    platform_close_log_file(metadata_handle);
 
-   exit(EXIT_SUCCESS);  // Only the child should reach here, so exit when done
+   return;
 }
 
 void splinterdb_print_cache(splinterdb* kvs) {
+   pid_t pid;
+   if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
+      perror("signal");
+      exit(EXIT_FAILURE);
+   }
+
+   pid = fork();
+   switch (pid) {
+   case -1:
+      perror("fork");
+      exit(EXIT_FAILURE);
+   case 0:
+      puts("Child beginning cachedump...");
+      if ( setsid() == -1 ) {
+         perror("setsid");
+         exit(EXIT_FAILURE);
+      }
+      break;
+   default:
+      puts("Fork succeeded. Returning from parent.");
+      return;
+   }
+
    dump_cache_pages(&kvs->cache_handle);
 
    platform_log_handle *log_handle = platform_open_log_file("/cachepages/bitmap", "w");
@@ -141,6 +142,8 @@ void splinterdb_print_cache(splinterdb* kvs) {
    log_handle = platform_open_log_file("/cachepages/stats", "w");
    kvs->cache_handle.super.ops->print_stats(log_handle, &kvs->cache_handle.super);
    platform_close_log_file(log_handle);
+
+   exit(EXIT_SUCCESS);  // Only the child should reach here, so exit when done
 }
 
 /*
