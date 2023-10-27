@@ -56,26 +56,21 @@ typedef struct splinterdb {
    bool               we_created_heap;
 } splinterdb;
 
-#define SINGLE_CACHEDUMP_FILE (1)
-
-void dump_cache_pages(clockcache *cc) {
+void dump_cache_pages(clockcache *cc, const char* dirname) {
    uint64    i;
    uint64    disk_addr;
    uint32    status;
    page_type pagetype;
 
-   struct stat st = {0};
-   if (stat("/cachepages", &st) == -1) {
-      mkdir("/cachepages", 0777);
-   }
-
-   const char* mdf = "/cachepages/metadata";
+   char* mdf = NULL;
+   asprintf(&mdf, "%s/metadata", dirname);
    platform_log_handle *metadata_handle = platform_open_log_file(mdf, "w");
+   platform_free(NULL, mdf);
 
-#if SINGLE_CACHEDUMP_FILE
-   const char* cdf = "/cachepages/dump";
+   char* cdf = NULL;
+   asprintf(&cdf, "%s/dump", dirname);
    platform_log_handle *cachedumpfile = platform_open_log_file(cdf, "w");
-#endif
+   platform_free(NULL, cdf);
 
    for (i = 0; i < cc->cfg->page_capacity; i++) {
       status    = cc->entry[i].status;
@@ -89,19 +84,7 @@ void dump_cache_pages(clockcache *cc) {
       platform_log(metadata_handle, "disk addr: 0x%016lx\n\n", disk_addr);
 
       // Write page from cache
-
-#if !SINGLE_CACHEDUMP_FILE
-      char* logfile;
-      asprintf(&logfile, "/cachepages/%07lu.page", i);
-      platform_log_handle *cachedumpfile = platform_open_log_file(logfile, "w");
-      platform_free(NULL, logfile);
-#endif
-
       fwrite(cc->entry[i].page.data, 1, 4096, cachedumpfile);
-
-#if !SINGLE_CACHEDUMP_FILE
-      platform_close_log_file(cachedumpfile);
-#endif
    }
 
    platform_close_log_file(metadata_handle);
@@ -109,7 +92,17 @@ void dump_cache_pages(clockcache *cc) {
    return;
 }
 
-void splinterdb_print_cache(splinterdb* kvs) {
+void splinterdb_print_cache(splinterdb* kvs, const char* dirname) {
+   struct stat st = {0};
+   if (stat(dirname, &st) == -1) {
+      int rc = mkdir(dirname, 0700);
+      if (rc) {
+         perror("splinterdb_print_cache, mkdir");
+         platform_assert(rc != 0);
+         return;
+      }
+   }
+
    pid_t pid;
    if (signal(SIGCHLD, SIG_IGN) == SIG_ERR) {
       perror("signal");
@@ -133,15 +126,21 @@ void splinterdb_print_cache(splinterdb* kvs) {
       return;
    }
 
-   dump_cache_pages(&kvs->cache_handle);
+   dump_cache_pages(&kvs->cache_handle, dirname);
 
-   platform_log_handle *log_handle = platform_open_log_file("/cachepages/bitmap", "w");
-   kvs->cache_handle.super.ops->print(log_handle, &kvs->cache_handle.super);
-   platform_close_log_file(log_handle);
+   char* bitmap_path = NULL;
+   asprintf(&bitmap_path, "%s/bitmap", dirname);
+   platform_log_handle *lh = platform_open_log_file(bitmap_path, "w");
+   kvs->cache_handle.super.ops->print(lh, &kvs->cache_handle.super);
+   platform_close_log_file(lh);
+   platform_free(NULL, bitmap_path);
 
-   log_handle = platform_open_log_file("/cachepages/stats", "w");
-   kvs->cache_handle.super.ops->print_stats(log_handle, &kvs->cache_handle.super);
-   platform_close_log_file(log_handle);
+   char* stats_path = NULL;
+   asprintf(&stats_path, "%s/stats", dirname);
+   lh = platform_open_log_file(stats_path, "w");
+   kvs->cache_handle.super.ops->print_stats(lh, &kvs->cache_handle.super);
+   platform_close_log_file(lh);
+   platform_free(NULL, stats_path);
 
    exit(EXIT_SUCCESS);  // Only the child should reach here, so exit when done
 }

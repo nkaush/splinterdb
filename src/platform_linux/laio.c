@@ -127,7 +127,12 @@ io_handle_init(laio_handle *io, io_config *cfg, platform_heap_id hid)
    }
 
    if (is_create) {
-      fallocate(io->fd, 0, 0, 128 * 1024);
+      int rc = posix_fallocate(io->fd, 0, 128 * 1024);
+      if (rc) {
+         platform_error_log(
+            "posix_fallocate() '%s' failed: %s\n", cfg->filename, strerror(errno));
+         return CONST_STATUS(errno);
+      }
    }
 
    /*

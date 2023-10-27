@@ -423,6 +423,6 @@ splinterdb_stats_print_lookup(const splinterdb *kvs);
 void
 splinterdb_stats_reset(splinterdb *kvs);
 
-void splinterdb_print_cache(splinterdb* kvs);
+void splinterdb_print_cache(splinterdb* kvs, const char* dirname);
 
 #endif // _SPLINTERDB_H_
