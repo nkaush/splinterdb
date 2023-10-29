@@ -142,6 +142,7 @@ void splinterdb_print_cache(splinterdb* kvs, const char* dirname) {
    platform_close_log_file(lh);
    platform_free(NULL, stats_path);
 
+   puts("Child finished cachedump.");
    exit(EXIT_SUCCESS);  // Only the child should reach here, so exit when done
 }
 
