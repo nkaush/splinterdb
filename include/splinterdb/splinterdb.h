@@ -404,6 +404,10 @@ splinterdb_iterator_get_current(splinterdb_iterator *iter, // IN
 int
 splinterdb_iterator_status(const splinterdb_iterator *iter);
 
+// clear splinterdb cache without closing the db.
+void
+splinterdb_clear_cache(splinterdb* kvs);
+
 /*
  * Statistics Printing
  *
@@ -423,6 +427,7 @@ splinterdb_stats_print_lookup(const splinterdb *kvs);
 void
 splinterdb_stats_reset(splinterdb *kvs);
 
-void splinterdb_print_cache(splinterdb* kvs, const char* dirname);
+void
+splinterdb_print_cache(splinterdb* kvs, const char* dirname);
 
 #endif // _SPLINTERDB_H_

@@ -146,6 +146,16 @@ void splinterdb_print_cache(splinterdb* kvs, const char* dirname) {
    exit(EXIT_SUCCESS);  // Only the child should reach here, so exit when done
 }
 
+/**
+ * @brief clear splinterdb's cache without closing the db (TODO).
+ * 
+ * @param kvs splinter db obj, provides access to cache_handle
+ */
+void splinterdb_clear_cache(splinterdb* kvs) {
+   clockcache_deinit(&kvs->cache_handle);
+   return;
+}
+
 /*
  * Extract errno.h -style status int from a platform_status
  *
