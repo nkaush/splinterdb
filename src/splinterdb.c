@@ -153,6 +153,22 @@ void splinterdb_print_cache(splinterdb* kvs, const char* dirname) {
  */
 void splinterdb_clear_cache(splinterdb* kvs) {
    clockcache_deinit(&kvs->cache_handle);
+   platform_status status = clockcache_init(
+      &kvs->cache_handle,
+      &kvs->cache_cfg,
+      (io_handle *)&kvs->io_handle,
+      (allocator *)&kvs->allocator_handle,
+      "splinterdb",
+      kvs->heap_id,
+      platform_get_module_id()
+   );
+
+   if (!SUCCESS(status)) {
+      platform_error_log("Failed to initialize SplinterDB cache: %s\n",
+                         platform_status_to_string(status));
+      exit(5);
+   }
+
    return;
 }
 
