@@ -153,6 +153,7 @@ void splinterdb_print_cache(splinterdb* kvs, const char* dirname) {
  */
 void splinterdb_clear_cache(splinterdb* kvs) {
    kvs->cache_handle.super.ops->evict(&kvs->cache_handle.super, 1);
+   kvs->cache_handle.super.ops->reset_stats(&kvs->cache_handle.super);
 }
 
 /*
