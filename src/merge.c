@@ -27,10 +27,10 @@ bool32
 merge_can_next(iterator *itor);
 
 platform_status
-merge_next(iterator *itor);
+merge_next(iterator *itor, bool32 *did_we_miss);
 
 platform_status
-merge_prev(iterator *itor);
+merge_prev(iterator *itor, bool32 *did_we_miss);
 
 static iterator_ops merge_ops = {
    .curr     = merge_curr,
@@ -165,7 +165,7 @@ debug_verify_sorted(debug_only merge_iterator *merge_itor,
 }
 
 static inline platform_status
-advance_and_resort_min_ritor(merge_iterator *merge_itor)
+advance_and_resort_min_ritor(merge_iterator *merge_itor, bool32 *did_we_miss)
 {
    platform_status rc;
 
@@ -176,9 +176,9 @@ advance_and_resort_min_ritor(merge_iterator *merge_itor)
    merge_itor->ordered_iterators[0]->curr_key       = NULL_KEY;
    merge_itor->ordered_iterators[0]->curr_data      = NULL_MESSAGE;
    if (merge_itor->forwards) {
-      rc = iterator_next(merge_itor->ordered_iterators[0]->itor);
+      rc = iterator_next(merge_itor->ordered_iterators[0]->itor, did_we_miss);
    } else {
-      rc = iterator_prev(merge_itor->ordered_iterators[0]->itor);
+      rc = iterator_prev(merge_itor->ordered_iterators[0]->itor, did_we_miss);
    }
 
    if (!SUCCESS(rc)) {
@@ -247,7 +247,7 @@ out:
  * keys, resolve_equal_keys will merge the data as necessary
  */
 static platform_status
-merge_resolve_equal_keys(merge_iterator *merge_itor)
+merge_resolve_equal_keys(merge_iterator *merge_itor, bool32 *did_we_miss)
 {
    debug_assert(merge_itor->ordered_iterators[0]->next_key_equal);
    debug_assert(message_data(merge_itor->curr_data)
@@ -292,7 +292,7 @@ merge_resolve_equal_keys(merge_iterator *merge_itor)
        */
       merge_itor->curr_key = merge_itor->ordered_iterators[1]->curr_key;
       debug_assert(key_is_user_key(merge_itor->curr_key));
-      platform_status rc = advance_and_resort_min_ritor(merge_itor);
+      platform_status rc = advance_and_resort_min_ritor(merge_itor, did_we_miss);
       if (!SUCCESS(rc)) {
          return rc;
       }
@@ -357,7 +357,7 @@ merge_finalize_updates_and_discard_deletes(merge_iterator *merge_itor,
 }
 
 static platform_status
-advance_one_loop(merge_iterator *merge_itor, bool32 *retry)
+advance_one_loop(merge_iterator *merge_itor, bool32 *retry, bool32 *did_we_miss)
 {
    *retry = FALSE;
    // Determine whether we're no longer in range.
@@ -385,7 +385,7 @@ advance_one_loop(merge_iterator *merge_itor, bool32 *retry)
 
    platform_status rc;
    if (merge_itor->ordered_iterators[0]->next_key_equal) {
-      rc = merge_resolve_equal_keys(merge_itor);
+      rc = merge_resolve_equal_keys(merge_itor, did_we_miss);
       if (!SUCCESS(rc)) {
          return rc;
       }
@@ -726,7 +726,7 @@ merge_advance_helper(merge_iterator *merge_itor)
  *-----------------------------------------------------------------------------
  */
 platform_status
-merge_next(iterator *itor)
+merge_next(iterator *itor, bool32 *did_we_miss)
 {
    merge_iterator *merge_itor = (merge_iterator *)itor;
 
@@ -747,7 +747,7 @@ merge_next(iterator *itor)
  *-----------------------------------------------------------------------------
  */
 platform_status
-merge_prev(iterator *itor)
+merge_prev(iterator *itor, bool32 *did_we_miss)
 {
    merge_iterator *merge_itor = (merge_iterator *)itor;
 

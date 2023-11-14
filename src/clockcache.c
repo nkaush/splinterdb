@@ -141,7 +141,7 @@ uint8
 clockcache_get_allocator_ref(clockcache *cc, uint64 addr);
 
 page_handle *
-clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type);
+clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss);
 
 void
 clockcache_unget(clockcache *cc, page_handle *page);
@@ -174,7 +174,8 @@ cache_async_result
 clockcache_get_async(clockcache       *cc,
                      uint64            addr,
                      page_type         type,
-                     cache_async_ctxt *ctxt);
+                     cache_async_ctxt *ctxt,
+                     bool32           *did_we_miss);
 
 void
 clockcache_async_done(clockcache *cc, page_type type, cache_async_ctxt *ctxt);
@@ -289,10 +290,10 @@ clockcache_extent_discard_virtual(cache *c, uint64 addr, page_type type)
 }
 
 page_handle *
-clockcache_get_virtual(cache *c, uint64 addr, bool32 blocking, page_type type)
+clockcache_get_virtual(cache *c, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss)
 {
    clockcache *cc = (clockcache *)c;
-   return clockcache_get(cc, addr, blocking, type);
+   return clockcache_get(cc, addr, blocking, type, did_we_miss);
 }
 
 void
@@ -362,10 +363,11 @@ cache_async_result
 clockcache_get_async_virtual(cache            *c,
                              uint64            addr,
                              page_type         type,
-                             cache_async_ctxt *ctxt)
+                             cache_async_ctxt *ctxt,
+                             bool32           *did_we_miss)
 {
    clockcache *cc = (clockcache *)c;
-   return clockcache_get_async(cc, addr, type, ctxt);
+   return clockcache_get_async(cc, addr, type, ctxt, did_we_miss);
 }
 
 void
@@ -2093,7 +2095,8 @@ clockcache_get_internal(clockcache   *cc,       // IN
                         uint64        addr,     // IN
                         bool32        blocking, // IN
                         page_type     type,     // IN
-                        page_handle **page)     // OUT
+                        page_handle **page,     // OUT
+                        bool32* did_we_miss)    // OUT
 {
    debug_only uint64 page_size = clockcache_page_size(cc);
    debug_assert(
@@ -2231,6 +2234,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
    status = io_read(cc->io, entry->page.data, clockcache_page_size(cc), addr);
    platform_assert_status_ok(status);
 
+   *did_we_miss = TRUE;
    if (cc->cfg->use_stats) {
       elapsed = platform_timestamp_elapsed(start);
       cc->stats[tid].cache_misses[type]++;
@@ -2264,7 +2268,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
  *----------------------------------------------------------------------
  */
 page_handle *
-clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type)
+clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss)
 {
    bool32       retry;
    page_handle *handle;
@@ -2272,7 +2276,7 @@ clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type)
    debug_assert(cc->per_thread[platform_get_tid()].enable_sync_get
                 || type == PAGE_TYPE_MEMTABLE);
    while (1) {
-      retry = clockcache_get_internal(cc, addr, blocking, type, &handle);
+      retry = clockcache_get_internal(cc, addr, blocking, type, &handle, did_we_miss);
       if (!retry) {
          return handle;
       }
@@ -2350,7 +2354,8 @@ cache_async_result
 clockcache_get_async(clockcache       *cc,   // IN
                      uint64            addr, // IN
                      page_type         type, // IN
-                     cache_async_ctxt *ctxt) // IN
+                     cache_async_ctxt *ctxt, // IN
+                     bool32           *did_we_miss) // OUT
 {
 #if SPLINTER_DEBUG
    static unsigned stress_retry;
@@ -2477,6 +2482,7 @@ clockcache_get_async(clockcache       *cc,   // IN
    status = io_read_async(cc->io, req, clockcache_read_async_callback, 1, addr);
    platform_assert_status_ok(status);
 
+   *did_we_miss = TRUE;
    if (cc->cfg->use_stats) {
       cc->stats[tid].cache_misses[type]++;
    }

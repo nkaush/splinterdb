@@ -18,11 +18,12 @@ typedef enum comparison {
 
 typedef void (*iterator_curr_fn)(iterator *itor, key *curr_key, message *msg);
 typedef bool32 (*iterator_bound_fn)(iterator *itor);
-typedef platform_status (*iterator_step_fn)(iterator *itor);
+typedef platform_status (*iterator_step_fn)(iterator *itor, bool32 *did_we_miss);
 typedef platform_status (*iterator_seek_fn)(iterator  *itor,
                                             key        seek_key,
-                                            comparison from_above);
-typedef void (*iterator_print_fn)(iterator *itor);
+                                            comparison from_above,
+                                            bool32    *did_we_miss);
+typedef void (*iterator_print_fn)(iterator *itor, bool32 *did_we_miss);
 
 typedef struct iterator_ops {
    /* Callers should not modify data pointed to by *key or *data */
@@ -67,25 +68,25 @@ iterator_can_curr(iterator *itor)
 }
 
 static inline platform_status
-iterator_next(iterator *itor)
+iterator_next(iterator *itor, bool32 *did_we_miss)
 {
-   return itor->ops->next(itor);
+   return itor->ops->next(itor, did_we_miss);
 }
 
 static inline platform_status
-iterator_prev(iterator *itor)
+iterator_prev(iterator *itor, bool32 *did_we_miss)
 {
-   return itor->ops->prev(itor);
+   return itor->ops->prev(itor, did_we_miss);
 }
 
 static inline platform_status
-iterator_seek(iterator *itor, key seek_key, comparison seek_type)
+iterator_seek(iterator *itor, key seek_key, comparison seek_type, bool32 *did_we_miss)
 {
-   return itor->ops->seek(itor, seek_key, seek_type);
+   return itor->ops->seek(itor, seek_key, seek_type, did_we_miss);
 }
 
 static inline void
-iterator_print(iterator *itor)
+iterator_print(iterator *itor, bool32 *did_we_miss)
 {
-   return itor->ops->print(itor);
+   return itor->ops->print(itor, did_we_miss);
 }

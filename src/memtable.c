@@ -214,7 +214,8 @@ memtable_insert(memtable_context *ctxt,
                 platform_heap_id  heap_id,
                 key               tuple_key,
                 message           msg,
-                uint64           *leaf_generation)
+                uint64           *leaf_generation,
+                bool32           *did_we_miss)
 {
    const threadid tid = platform_get_tid();
    bool32         was_unique;
@@ -228,7 +229,8 @@ memtable_insert(memtable_context *ctxt,
                                      tuple_key,
                                      msg,
                                      leaf_generation,
-                                     &was_unique);
+                                     &was_unique,
+                                     did_we_miss);
    if (!SUCCESS(rc)) {
       return rc;
    }
