@@ -35,6 +35,7 @@ typedef struct cache_stats {
    uint64 prefetches_issued[NUM_PAGE_TYPES];
    uint64 writes_issued;
    uint64 syncs_issued;
+   uint64 ops_incurring_miss;
 } PLATFORM_CACHELINE_ALIGNED cache_stats;
 
 /*
@@ -139,12 +140,12 @@ typedef page_handle *(*page_get_fn)(cache    *cc,
                                     uint64    addr,
                                     bool32    blocking,
                                     page_type type,
-                                    bool32   *did_we_miss);
+                                    uint32 *did_we_miss);
 typedef cache_async_result (*page_get_async_fn)(cache            *cc,
                                                 uint64            addr,
                                                 page_type         type,
                                                 cache_async_ctxt *ctxt,
-                                                bool32           *did_we_miss);
+                                                uint32 *did_we_miss);
 typedef void (*page_async_done_fn)(cache            *cc,
                                    page_type         type,
                                    cache_async_ctxt *ctxt);
@@ -280,7 +281,7 @@ cache_extent_discard(cache *cc, uint64 addr, page_type type)
  *----------------------------------------------------------------------
  */
 static inline page_handle *
-cache_get(cache *cc, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss)
+cache_get(cache *cc, uint64 addr, bool32 blocking, page_type type, uint32 *did_we_miss)
 {
    return cc->ops->page_get(cc, addr, blocking, type, did_we_miss);
 }
@@ -312,7 +313,7 @@ cache_ctxt_init(cache            *cc,
  *----------------------------------------------------------------------
  */
 static inline cache_async_result
-cache_get_async(cache *cc, uint64 addr, page_type type, cache_async_ctxt *ctxt, bool32* did_we_miss)
+cache_get_async(cache *cc, uint64 addr, page_type type, cache_async_ctxt *ctxt, uint32 *did_we_miss)
 {
    return cc->ops->page_get_async(cc, addr, type, ctxt, did_we_miss);
 }

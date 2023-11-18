@@ -165,10 +165,10 @@ memtable_insert(memtable_context *ctxt,
                 key               tuple_key,
                 message           msg,
                 uint64           *generation,
-                bool32           *did_we_miss);
+                uint32 *did_we_miss);
 
 bool32
-memtable_dec_ref_maybe_recycle(memtable_context *ctxt, memtable *mt);
+memtable_dec_ref_maybe_recycle(memtable_context *ctxt, memtable *mt, uint32 *did_we_miss);
 
 uint64
 memtable_force_finalize(memtable_context *ctxt);
@@ -177,7 +177,7 @@ void
 memtable_init(memtable *mt, cache *cc, memtable_config *cfg, uint64 generation);
 
 void
-memtable_deinit(cache *cc, memtable *mt);
+memtable_deinit(cache *cc, memtable *mt, uint32 *did_we_miss);
 
 memtable_context *
 memtable_context_create(platform_heap_id hid,
@@ -187,7 +187,7 @@ memtable_context_create(platform_heap_id hid,
                         void            *process_ctxt);
 
 void
-memtable_context_destroy(platform_heap_id hid, memtable_context *ctxt);
+memtable_context_destroy(platform_heap_id hid, memtable_context *ctxt, uint32 *did_we_miss);
 
 void
 memtable_config_init(memtable_config *cfg,
@@ -256,9 +256,9 @@ memtable_unlock_incorporation_lock(memtable_context *ctxt)
 }
 
 static inline void
-memtable_zap(cache *cc, memtable *mt)
+memtable_zap(cache *cc, memtable *mt, uint32 *did_we_miss)
 {
-   btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE);
+   btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE, did_we_miss);
 }
 
 static inline bool32
@@ -279,19 +279,19 @@ bool32
 memtable_is_empty(memtable_context *mt_ctxt);
 
 static inline bool32
-memtable_verify(cache *cc, memtable *mt, bool32 *did_we_miss)
+memtable_verify(cache *cc, memtable *mt, uint32 *did_we_miss)
 {
    return btree_verify_tree(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE, did_we_miss);
 }
 
 static inline void
-memtable_print(platform_log_handle *log_handle, cache *cc, memtable *mt, bool32 *did_we_miss)
+memtable_print(platform_log_handle *log_handle, cache *cc, memtable *mt, uint32 *did_we_miss)
 {
    btree_print_memtable_tree(log_handle, cc, mt->cfg, mt->root_addr, did_we_miss);
 }
 
 static inline void
-memtable_print_stats(platform_log_handle *log_handle, cache *cc, memtable *mt, bool32 *did_we_miss)
+memtable_print_stats(platform_log_handle *log_handle, cache *cc, memtable *mt, uint32 *did_we_miss)
 {
    btree_print_tree_stats(log_handle, cc, mt->cfg, mt->root_addr, did_we_miss);
 }

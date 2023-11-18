@@ -27,10 +27,10 @@ bool32
 merge_can_next(iterator *itor);
 
 platform_status
-merge_next(iterator *itor, bool32 *did_we_miss);
+merge_next(iterator *itor, uint32 *did_we_miss);
 
 platform_status
-merge_prev(iterator *itor, bool32 *did_we_miss);
+merge_prev(iterator *itor, uint32 *did_we_miss);
 
 static iterator_ops merge_ops = {
    .curr     = merge_curr,
@@ -165,7 +165,7 @@ debug_verify_sorted(debug_only merge_iterator *merge_itor,
 }
 
 static inline platform_status
-advance_and_resort_min_ritor(merge_iterator *merge_itor, bool32 *did_we_miss)
+advance_and_resort_min_ritor(merge_iterator *merge_itor, uint32 *did_we_miss)
 {
    platform_status rc;
 
@@ -247,7 +247,7 @@ out:
  * keys, resolve_equal_keys will merge the data as necessary
  */
 static platform_status
-merge_resolve_equal_keys(merge_iterator *merge_itor, bool32 *did_we_miss)
+merge_resolve_equal_keys(merge_iterator *merge_itor, uint32 *did_we_miss)
 {
    debug_assert(merge_itor->ordered_iterators[0]->next_key_equal);
    debug_assert(message_data(merge_itor->curr_data)
@@ -357,7 +357,7 @@ merge_finalize_updates_and_discard_deletes(merge_iterator *merge_itor,
 }
 
 static platform_status
-advance_one_loop(merge_iterator *merge_itor, bool32 *retry, bool32 *did_we_miss)
+advance_one_loop(merge_iterator *merge_itor, bool32 *retry, uint32 *did_we_miss)
 {
    *retry = FALSE;
    // Determine whether we're no longer in range.
@@ -414,7 +414,7 @@ advance_one_loop(merge_iterator *merge_itor, bool32 *retry, bool32 *did_we_miss)
  *    5. The first key in the sorted order has all its iterators merged.
  */
 static platform_status
-setup_ordered_iterators(merge_iterator *merge_itor)
+setup_ordered_iterators(merge_iterator *merge_itor, uint32 *did_we_miss)
 {
    platform_status   rc = STATUS_OK;
    ordered_iterator *temp;
@@ -470,13 +470,13 @@ setup_ordered_iterators(merge_iterator *merge_itor)
    }
 
    bool32 retry;
-   rc = advance_one_loop(merge_itor, &retry);
+   rc = advance_one_loop(merge_itor, &retry, did_we_miss);
 
    if (retry && SUCCESS(rc)) {
       if (merge_itor->forwards) {
-         rc = merge_next((iterator *)merge_itor);
+         rc = merge_next((iterator *)merge_itor, did_we_miss);
       } else {
-         rc = merge_prev((iterator *)merge_itor);
+         rc = merge_prev((iterator *)merge_itor, did_we_miss);
       }
    }
 
@@ -523,7 +523,8 @@ merge_iterator_create(platform_heap_id hid,
                       int              num_trees,
                       iterator       **itor_arr,
                       merge_behavior   merge_mode,
-                      merge_iterator **out_itor)
+                      merge_iterator **out_itor,
+                      uint32 *did_we_miss)
 {
    int             i;
    platform_status rc = STATUS_OK;
@@ -577,7 +578,7 @@ merge_iterator_create(platform_heap_id hid,
          &merge_itor->ordered_iterator_stored[i];
    }
 
-   rc = setup_ordered_iterators(merge_itor);
+   rc = setup_ordered_iterators(merge_itor, did_we_miss);
    if (!SUCCESS(rc)) {
       return rc;
    }
@@ -617,7 +618,7 @@ merge_iterator_destroy(platform_heap_id hid, merge_iterator **merge_itor)
  *-----------------------------------------------------------------------------
  */
 static platform_status
-merge_iterator_set_direction(merge_iterator *merge_itor, bool32 forwards)
+merge_iterator_set_direction(merge_iterator *merge_itor, bool32 forwards, uint32 *did_we_miss)
 {
    debug_assert(merge_itor->forwards != forwards);
    platform_status rc;
@@ -627,16 +628,16 @@ merge_iterator_set_direction(merge_iterator *merge_itor, bool32 forwards)
    for (int i = 0; i < merge_itor->num_trees; i++) {
       if (forwards && iterator_can_next(merge_itor->ordered_iterators[i]->itor))
       {
-         iterator_next(merge_itor->ordered_iterators[i]->itor);
+         iterator_next(merge_itor->ordered_iterators[i]->itor, did_we_miss);
       }
       if (!forwards
           && iterator_can_prev(merge_itor->ordered_iterators[i]->itor)) {
-         iterator_prev(merge_itor->ordered_iterators[i]->itor);
+         iterator_prev(merge_itor->ordered_iterators[i]->itor, did_we_miss);
       }
    }
 
    // restore iterator invariants
-   rc = setup_ordered_iterators(merge_itor);
+   rc = setup_ordered_iterators(merge_itor, did_we_miss);
 
    return rc;
 }
@@ -693,7 +694,7 @@ merge_curr(iterator *itor, key *curr_key, message *data)
 }
 
 static inline platform_status
-merge_advance_helper(merge_iterator *merge_itor)
+merge_advance_helper(merge_iterator *merge_itor, uint32 *did_we_miss)
 {
    platform_status rc = STATUS_OK;
    bool32          retry;
@@ -701,12 +702,12 @@ merge_advance_helper(merge_iterator *merge_itor)
       merge_itor->curr_key  = NULL_KEY;
       merge_itor->curr_data = NULL_MESSAGE;
       // Advance one iterator
-      rc = advance_and_resort_min_ritor(merge_itor);
+      rc = advance_and_resort_min_ritor(merge_itor, did_we_miss);
       if (!SUCCESS(rc)) {
          return rc;
       }
 
-      rc = advance_one_loop(merge_itor, &retry);
+      rc = advance_one_loop(merge_itor, &retry, did_we_miss);
       if (!SUCCESS(rc)) {
          return rc;
       }
@@ -726,14 +727,14 @@ merge_advance_helper(merge_iterator *merge_itor)
  *-----------------------------------------------------------------------------
  */
 platform_status
-merge_next(iterator *itor, bool32 *did_we_miss)
+merge_next(iterator *itor, uint32 *did_we_miss)
 {
    merge_iterator *merge_itor = (merge_iterator *)itor;
 
    if (!merge_itor->forwards) {
-      return merge_iterator_set_direction(merge_itor, TRUE);
+      return merge_iterator_set_direction(merge_itor, TRUE, did_we_miss);
    }
-   return merge_advance_helper(merge_itor);
+   return merge_advance_helper(merge_itor, did_we_miss);
 }
 
 /*
@@ -747,14 +748,14 @@ merge_next(iterator *itor, bool32 *did_we_miss)
  *-----------------------------------------------------------------------------
  */
 platform_status
-merge_prev(iterator *itor, bool32 *did_we_miss)
+merge_prev(iterator *itor, uint32 *did_we_miss)
 {
    merge_iterator *merge_itor = (merge_iterator *)itor;
 
    if (merge_itor->forwards) {
-      return merge_iterator_set_direction(merge_itor, FALSE);
+      return merge_iterator_set_direction(merge_itor, FALSE, did_we_miss);
    }
-   return merge_advance_helper(merge_itor);
+   return merge_advance_helper(merge_itor, did_we_miss);
 }
 
 void

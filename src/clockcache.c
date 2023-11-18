@@ -141,7 +141,7 @@ uint8
 clockcache_get_allocator_ref(clockcache *cc, uint64 addr);
 
 page_handle *
-clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss);
+clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, uint32 *did_we_miss);
 
 void
 clockcache_unget(clockcache *cc, page_handle *page);
@@ -175,7 +175,7 @@ clockcache_get_async(clockcache       *cc,
                      uint64            addr,
                      page_type         type,
                      cache_async_ctxt *ctxt,
-                     bool32           *did_we_miss);
+                     uint32 *did_we_miss);
 
 void
 clockcache_async_done(clockcache *cc, page_type type, cache_async_ctxt *ctxt);
@@ -290,7 +290,7 @@ clockcache_extent_discard_virtual(cache *c, uint64 addr, page_type type)
 }
 
 page_handle *
-clockcache_get_virtual(cache *c, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss)
+clockcache_get_virtual(cache *c, uint64 addr, bool32 blocking, page_type type, uint32 *did_we_miss)
 {
    clockcache *cc = (clockcache *)c;
    return clockcache_get(cc, addr, blocking, type, did_we_miss);
@@ -364,7 +364,7 @@ clockcache_get_async_virtual(cache            *c,
                              uint64            addr,
                              page_type         type,
                              cache_async_ctxt *ctxt,
-                             bool32           *did_we_miss)
+                             uint32 *did_we_miss)
 {
    clockcache *cc = (clockcache *)c;
    return clockcache_get_async(cc, addr, type, ctxt, did_we_miss);
@@ -2096,7 +2096,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
                         bool32        blocking, // IN
                         page_type     type,     // IN
                         page_handle **page,     // OUT
-                        bool32* did_we_miss)    // OUT
+                        uint32 *did_we_miss)    // OUT
 {
    debug_only uint64 page_size = clockcache_page_size(cc);
    debug_assert(
@@ -2234,7 +2234,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
    status = io_read(cc->io, entry->page.data, clockcache_page_size(cc), addr);
    platform_assert_status_ok(status);
 
-   *did_we_miss = TRUE;
+   *did_we_miss += 1;
    if (cc->cfg->use_stats) {
       elapsed = platform_timestamp_elapsed(start);
       cc->stats[tid].cache_misses[type]++;
@@ -2268,7 +2268,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
  *----------------------------------------------------------------------
  */
 page_handle *
-clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, bool32* did_we_miss)
+clockcache_get(clockcache *cc, uint64 addr, bool32 blocking, page_type type, uint32 *did_we_miss)
 {
    bool32       retry;
    page_handle *handle;
@@ -2355,7 +2355,7 @@ clockcache_get_async(clockcache       *cc,   // IN
                      uint64            addr, // IN
                      page_type         type, // IN
                      cache_async_ctxt *ctxt, // IN
-                     bool32           *did_we_miss) // OUT
+                     uint32 *did_we_miss) // OUT
 {
 #if SPLINTER_DEBUG
    static unsigned stress_retry;
@@ -2482,7 +2482,7 @@ clockcache_get_async(clockcache       *cc,   // IN
    status = io_read_async(cc->io, req, clockcache_read_async_callback, 1, addr);
    platform_assert_status_ok(status);
 
-   *did_we_miss = TRUE;
+   *did_we_miss += 1;
    if (cc->cfg->use_stats) {
       cc->stats[tid].cache_misses[type]++;
    }
@@ -3109,6 +3109,7 @@ clockcache_print_stats(platform_log_handle *log_handle, clockcache *cc)
       }
       global_stats.writes_issued += cc->stats[i].writes_issued;
       global_stats.syncs_issued += cc->stats[i].syncs_issued;
+      global_stats.ops_incurring_miss += cc->stats[i].ops_incurring_miss;
    }
 
    fraction miss_time[NUM_PAGE_TYPES];
@@ -3181,6 +3182,8 @@ clockcache_print_stats(platform_log_handle *log_handle, clockcache *cc)
    platform_log(log_handle, "-----------------------------------------------------------------------------------------------\n");
    platform_log(log_handle, "avg write pgs: "FRACTION_FMT(9,2)"\n",
                 FRACTION_ARGS(avg_write_pages));
+
+   platform_log(log_handle, "ops incurring misses: %lu\n", global_stats.ops_incurring_miss);
    // clang-format on
 
    allocator_print_stats(cc->al);

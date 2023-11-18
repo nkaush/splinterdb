@@ -1066,9 +1066,10 @@ btree_alloc(cache          *cc,
             key             alloc_key,
             uint64         *next_extent,
             page_type       type,
-            btree_node     *node)
+            btree_node     *node,
+            uint32 *did_we_miss)
 {
-   node->addr = mini_alloc(mini, height, alloc_key, next_extent);
+   node->addr = mini_alloc(mini, height, alloc_key, next_extent, did_we_miss);
    debug_assert(node->addr != 0);
    node->page = cache_alloc(cc, node->addr, type);
 
@@ -1092,7 +1093,7 @@ btree_node_get(cache              *cc,
                const btree_config *cfg,
                btree_node         *node,
                page_type           type,
-               bool32             *did_we_miss)
+               uint32 *did_we_miss)
 {
    debug_assert(node->addr != 0);
 
@@ -1239,12 +1240,13 @@ btree_inc_ref_range(cache              *cc,
                     const btree_config *cfg,
                     uint64              root_addr,
                     key                 start_key,
-                    key                 end_key)
+                    key                 end_key,
+                    uint32 *did_we_miss)
 {
    debug_assert(btree_key_compare(cfg, start_key, end_key) <= 0);
    uint64 meta_page_addr = btree_root_to_meta_addr(cfg, root_addr, 0);
    mini_keyed_inc_ref(
-      cc, cfg->data_cfg, PAGE_TYPE_BRANCH, meta_page_addr, start_key, end_key);
+      cc, cfg->data_cfg, PAGE_TYPE_BRANCH, meta_page_addr, start_key, end_key, did_we_miss);
 }
 
 bool32
@@ -1252,23 +1254,25 @@ btree_dec_ref_range(cache              *cc,
                     const btree_config *cfg,
                     uint64              root_addr,
                     key                 start_key,
-                    key                 end_key)
+                    key                 end_key,
+                    uint32 *did_we_miss)
 {
    debug_assert(btree_key_compare(cfg, start_key, end_key) <= 0);
    uint64 meta_page_addr = btree_root_to_meta_addr(cfg, root_addr, 0);
    return mini_keyed_dec_ref(
-      cc, cfg->data_cfg, PAGE_TYPE_BRANCH, meta_page_addr, start_key, end_key);
+      cc, cfg->data_cfg, PAGE_TYPE_BRANCH, meta_page_addr, start_key, end_key, did_we_miss);
 }
 
 bool32
 btree_dec_ref(cache              *cc,
               const btree_config *cfg,
               uint64              root_addr,
-              page_type           type)
+              page_type           type,
+              uint32 *did_we_miss)
 {
    platform_assert(type == PAGE_TYPE_MEMTABLE);
    uint64 meta_head = btree_root_to_meta_addr(cfg, root_addr, 0);
-   uint8  ref       = mini_unkeyed_dec_ref(cc, meta_head, type, TRUE);
+   uint8  ref       = mini_unkeyed_dec_ref(cc, meta_head, type, TRUE, did_we_miss);
    return ref == 0;
 }
 
@@ -1337,7 +1341,7 @@ btree_split_child_leaf(cache                 *cc,
                        btree_node            *child,
                        leaf_incorporate_spec *spec,
                        uint64                *generation,  // OUT
-                       bool32                *did_we_miss) // OUT
+                       uint32 *did_we_miss) // OUT
 {
    btree_node right_child;
 
@@ -1361,7 +1365,7 @@ btree_split_child_leaf(cache                 *cc,
                NULL_KEY,
                NULL,
                PAGE_TYPE_MEMTABLE,
-               &right_child);
+               &right_child, did_we_miss);
    /* p: claim, c: claim, rc: write, cn: - */
 
    btree_node_lock(cc, cfg, parent);
@@ -1446,7 +1450,7 @@ btree_defragment_or_split_child_leaf(cache              *cc,
                                      btree_node *child,
                                      leaf_incorporate_spec *spec,
                                      uint64                *generation,  // OUT
-                                     bool32                *did_we_miss) // OUT
+                                     uint32 *did_we_miss) // OUT
 {
    uint64 nentries   = btree_num_entries(child->hdr);
    uint64 live_bytes = 0;
@@ -1515,7 +1519,8 @@ btree_split_child_index(cache              *cc,
                         btree_node         *child,
                         key                 key_to_be_inserted,
                         btree_node         *new_child, // OUT
-                        int64              *next_child_idx)         // IN/OUT
+                        int64              *next_child_idx,
+                        uint32 *did_we_miss)         // IN/OUT
 {
    btree_node right_child;
 
@@ -1531,7 +1536,7 @@ btree_split_child_index(cache              *cc,
                NULL_KEY,
                NULL,
                PAGE_TYPE_MEMTABLE,
-               &right_child);
+               &right_child, did_we_miss);
 
    /* p: lock, c: lock, rc: lock */
 
@@ -1604,7 +1609,8 @@ btree_defragment_or_split_child_index(cache              *cc,
                                       btree_node *child,
                                       key         key_to_be_inserted,
                                       btree_node *new_child, // OUT
-                                      int64      *next_child_idx) // IN/OUT
+                                      int64      *next_child_idx, // IN/OUT
+                                      uint32 *did_we_miss) 
 {
    uint64 nentries   = btree_num_entries(child->hdr);
    uint64 live_bytes = 0;
@@ -1628,7 +1634,7 @@ btree_defragment_or_split_child_index(cache              *cc,
                               child,
                               key_to_be_inserted,
                               new_child,
-                              next_child_idx);
+                              next_child_idx, did_we_miss);
    }
 
    return 0;
@@ -1694,7 +1700,8 @@ static inline int
 btree_grow_root(cache              *cc,   // IN
                 const btree_config *cfg,  // IN
                 mini_allocator     *mini, // IN/OUT
-                btree_node         *root_node)    // OUT
+                btree_node         *root_node,   // OUT
+                uint32 *did_we_miss) 
 {
    // allocate a new left node
    btree_node child;
@@ -1704,7 +1711,8 @@ btree_grow_root(cache              *cc,   // IN
                NULL_KEY,
                NULL,
                PAGE_TYPE_MEMTABLE,
-               &child);
+               &child,
+               did_we_miss);
 
    // copy root to child
    memmove(child.hdr, root_node->hdr, btree_page_size(cfg));
@@ -1745,7 +1753,7 @@ btree_insert(cache              *cc,         // IN
              message             msg,        // IN
              uint64             *generation, // OUT
              bool32             *was_unique, // OUT
-             bool32             *did_we_miss)// OUT
+             uint32 *did_we_miss)// OUT
 {
    platform_status       rc;
    leaf_incorporate_spec spec;
@@ -1793,7 +1801,7 @@ start_over:
          return STATUS_OK;
       }
       destroy_leaf_incorporate_spec(&spec);
-      btree_grow_root(cc, cfg, mini, &root_node);
+      btree_grow_root(cc, cfg, mini, &root_node, did_we_miss);
       btree_node_unlock(cc, cfg, &root_node);
       btree_node_unclaim(cc, cfg, &root_node);
    }
@@ -1823,7 +1831,7 @@ start_over:
                                    parent_entry->pivot_data.stats);
       }
       if (btree_index_is_full(cfg, root_node.hdr)) {
-         btree_grow_root(cc, cfg, mini, &root_node);
+         btree_grow_root(cc, cfg, mini, &root_node, did_we_miss);
          child_idx = 0;
       }
       if (need_to_set_min_key) {
@@ -1906,7 +1914,7 @@ start_over:
                                                   &child_node,
                                                   tuple_key,
                                                   &new_child,
-                                                  &next_child_idx);
+                                                  &next_child_idx, did_we_miss);
             parent_node = new_child;
          } else {
             btree_node_full_unlock(cc, cfg, &parent_node);
@@ -2054,7 +2062,7 @@ btree_lookup_node(cache             *cc,             // IN
                   page_type          type,           // IN
                   btree_node        *out_node,       // OUT
                   btree_pivot_stats *stats,          // OUT
-                  bool32            *did_we_miss)    // OUT
+                  uint32 *did_we_miss)    // OUT
 {
    btree_node node, child_node;
    uint32     h;
@@ -2103,7 +2111,7 @@ btree_lookup_with_ref(cache        *cc,          // IN
                       btree_node   *node,        // OUT
                       message      *msg,         // OUT
                       bool32       *found,       // OUT
-                      bool32       *did_we_miss) // OUT
+                      uint32 *did_we_miss) // OUT
 {
    btree_lookup_node(cc, cfg, root_addr, target, 0, type, node, NULL, did_we_miss);
    int64 idx = btree_find_tuple(cfg, node->hdr, target, found);
@@ -2122,7 +2130,7 @@ btree_lookup(cache             *cc,          // IN
              page_type          type,        // IN
              key                target,      // IN
              merge_accumulator *result,      // OUT
-             bool32            *did_we_miss) // OUT
+             uint32 *did_we_miss) // OUT
 {
    btree_node      node;
    message         data;
@@ -2147,7 +2155,7 @@ btree_lookup_and_merge(cache             *cc,          // IN
                        key                target,      // IN
                        merge_accumulator *data,        // OUT
                        bool32            *local_found, // OUT
-                       bool32            *did_we_miss) // OUT
+                       uint32 *did_we_miss) // OUT
 {
    btree_node      node;
    message         local_data;
@@ -2253,7 +2261,7 @@ btree_lookup_async_with_ref(cache            *cc,        // IN
                             message          *data,      // OUT
                             bool32           *found,     // OUT
                             btree_async_ctxt *ctxt,      // IN
-                            bool32           *did_we_miss)  // OUT      
+                            uint32 *did_we_miss)  // OUT      
 {
    cache_async_result res  = 0;
    bool32             done = FALSE;
@@ -2390,7 +2398,7 @@ btree_lookup_async(cache             *cc,        // IN
                    key                target,    // IN
                    merge_accumulator *result,    // OUT
                    btree_async_ctxt  *ctxt,      // IN
-                   bool32            *did_we_miss) // OUT
+                   uint32 *did_we_miss) // OUT
 {
    cache_async_result res;
    btree_node         node;
@@ -2415,7 +2423,7 @@ btree_lookup_and_merge_async(cache             *cc,          // IN
                              merge_accumulator *data,        // OUT
                              bool32            *local_found, // OUT
                              btree_async_ctxt  *ctxt,        // IN
-                             bool32            *did_we_miss) // OUT
+                             uint32 *did_we_miss) // OUT
 {
    cache_async_result res;
    btree_node         node;
@@ -2567,7 +2575,7 @@ find_key_in_node(btree_iterator *itor,
 }
 
 static void
-btree_iterator_find_end(btree_iterator *itor, bool32 *did_we_miss)
+btree_iterator_find_end(btree_iterator *itor, uint32 *did_we_miss)
 {
    btree_node end;
 
@@ -2600,7 +2608,7 @@ btree_iterator_find_end(btree_iterator *itor, bool32 *did_we_miss)
  * ----------------------------------------------------------------------------
  */
 static void
-btree_iterator_next_leaf(btree_iterator *itor, bool32 *did_we_miss)
+btree_iterator_next_leaf(btree_iterator *itor, uint32 *did_we_miss)
 {
    cache        *cc  = itor->cc;
    btree_config *cfg = itor->cfg;
@@ -2664,7 +2672,7 @@ btree_iterator_next_leaf(btree_iterator *itor, bool32 *did_we_miss)
  * ----------------------------------------------------------------------------
  */
 static void
-btree_iterator_prev_leaf(btree_iterator *itor, bool32 *did_we_miss)
+btree_iterator_prev_leaf(btree_iterator *itor, uint32 *did_we_miss)
 {
    cache        *cc  = itor->cc;
    btree_config *cfg = itor->cfg;
@@ -2723,7 +2731,7 @@ btree_iterator_prev_leaf(btree_iterator *itor, bool32 *did_we_miss)
 }
 
 platform_status
-btree_iterator_next(iterator *base_itor, bool32 *did_we_miss)
+btree_iterator_next(iterator *base_itor, uint32 *did_we_miss)
 {
    debug_assert(base_itor != NULL);
    btree_iterator *itor = (btree_iterator *)base_itor;
@@ -2748,7 +2756,7 @@ btree_iterator_next(iterator *base_itor, bool32 *did_we_miss)
 }
 
 platform_status
-btree_iterator_prev(iterator *base_itor, bool32 *did_we_miss)
+btree_iterator_prev(iterator *base_itor, uint32 *did_we_miss)
 {
    debug_assert(base_itor != NULL);
    btree_iterator *itor = (btree_iterator *)base_itor;
@@ -2774,7 +2782,7 @@ static inline void
 find_btree_node_and_get_idx_bounds(btree_iterator *itor,
                                    key             target,
                                    comparison      position_rule,
-                                   bool32         *did_we_miss)
+                                   uint32 *did_we_miss)
 {
    // lookup the node that contains target
    btree_lookup_node(itor->cc,
@@ -2860,7 +2868,7 @@ find_btree_node_and_get_idx_bounds(btree_iterator *itor,
  * key.
  */
 platform_status
-btree_iterator_seek(iterator *base_itor, key seek_key, comparison seek_type, bool32* did_we_miss)
+btree_iterator_seek(iterator *base_itor, key seek_key, comparison seek_type, uint32 *did_we_miss)
 {
    debug_assert(base_itor != NULL);
    btree_iterator *itor = (btree_iterator *)base_itor;
@@ -2897,7 +2905,7 @@ btree_iterator_seek(iterator *base_itor, key seek_key, comparison seek_type, boo
 }
 
 void
-btree_iterator_print(iterator *itor, bool32 *did_we_miss)
+btree_iterator_print(iterator *itor, uint32 *did_we_miss)
 {
    debug_assert(itor != NULL);
    btree_iterator *btree_itor = (btree_iterator *)itor;
@@ -2948,7 +2956,7 @@ btree_iterator_init(cache          *cc,
                     comparison      start_type,
                     bool32          do_prefetch,
                     uint32          height,
-                    bool32         *did_we_miss)
+                    uint32 *did_we_miss)
 {
    platform_assert(root_addr != 0);
    debug_assert(page_type == PAGE_TYPE_MEMTABLE
@@ -3051,7 +3059,7 @@ btree_pack_get_current_node_stats(btree_pack_req *req, uint64 height)
 }
 
 static inline btree_node *
-btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot);
+btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot, uint32 *did_we_miss);
 
 /*
  * Add the specified node to its parent. Creates a parent if necessary.
@@ -3060,7 +3068,8 @@ static inline void
 btree_pack_link_node(btree_pack_req *req,
                      uint64          height,
                      uint64          offset,
-                     uint64          next_extent_addr)
+                     uint64          next_extent_addr,
+                     uint32 *did_we_miss)
 {
    btree_node        *edge       = &req->edge[height][offset];
    btree_pivot_stats *edge_stats = &req->edge_stats[height][offset];
@@ -3081,7 +3090,7 @@ btree_pack_link_node(btree_pack_req *req,
                                  edge->addr,
                                  *edge_stats))
    {
-      btree_pack_create_next_node(req, height + 1, pivot);
+      btree_pack_create_next_node(req, height + 1, pivot, did_we_miss);
       parent         = btree_pack_get_current_node(req, height + 1);
       bool32 success = btree_set_index_entry(
          req->cfg, parent->hdr, 0, pivot, edge->addr, *edge_stats);
@@ -3098,16 +3107,17 @@ btree_pack_link_node(btree_pack_req *req,
 static inline void
 btree_pack_link_extent(btree_pack_req *req,
                        uint64          height,
-                       uint64          next_extent_addr)
+                       uint64          next_extent_addr, 
+                       uint32 *did_we_miss)
 {
    for (int i = 0; i < req->num_edges[height]; i++) {
-      btree_pack_link_node(req, height, i, next_extent_addr);
+      btree_pack_link_node(req, height, i, next_extent_addr, did_we_miss);
    }
    req->num_edges[height] = 0;
 }
 
 static inline btree_node *
-btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot)
+btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot, uint32 *did_we_miss)
 {
    btree_node new_node;
    uint64     node_next_extent;
@@ -3117,7 +3127,7 @@ btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot)
                pivot,
                &node_next_extent,
                PAGE_TYPE_BRANCH,
-               &new_node);
+               &new_node, did_we_miss);
    btree_pack_node_init_hdr(req->cfg, new_node.hdr, 0, height);
 
    if (0 < req->num_edges[height]) {
@@ -3125,7 +3135,7 @@ btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot)
       old_node->hdr->next_addr = new_node.addr;
       new_node.hdr->prev_addr  = old_node->addr;
       if (!btree_addrs_share_extent(req->cc, old_node->addr, new_node.addr)) {
-         btree_pack_link_extent(req, height, new_node.addr);
+         btree_pack_link_extent(req, height, new_node.addr, did_we_miss);
       }
    }
 
@@ -3142,7 +3152,8 @@ btree_pack_create_next_node(btree_pack_req *req, uint64 height, key pivot)
 static inline platform_status
 btree_pack_loop(btree_pack_req *req,       // IN/OUT
                 key             tuple_key, // IN
-                message         msg)               // IN
+                message         msg, // IN
+                uint32 *did_we_miss)              
 {
    log_trace_key(tuple_key, "btree_pack_loop");
 
@@ -3156,7 +3167,7 @@ btree_pack_loop(btree_pack_req *req,       // IN/OUT
        || !btree_set_leaf_entry(
           req->cfg, leaf->hdr, btree_num_entries(leaf->hdr), tuple_key, msg))
    {
-      leaf = btree_pack_create_next_node(req, 0, tuple_key);
+      leaf = btree_pack_create_next_node(req, 0, tuple_key, did_we_miss);
       bool32 result =
          btree_set_leaf_entry(req->cfg, leaf->hdr, 0, tuple_key, msg);
       platform_assert(result);
@@ -3183,7 +3194,7 @@ btree_pack_loop(btree_pack_req *req,       // IN/OUT
 
 
 static inline void
-btree_pack_post_loop(btree_pack_req *req, key last_key, bool32 *did_we_miss)
+btree_pack_post_loop(btree_pack_req *req, key last_key, uint32 *did_we_miss)
 {
    cache        *cc  = req->cc;
    btree_config *cfg = req->cfg;
@@ -3193,14 +3204,14 @@ btree_pack_post_loop(btree_pack_req *req, key last_key, bool32 *did_we_miss)
 
    // if output tree is empty, deallocate any preallocated extents
    if (req->num_tuples == 0) {
-      mini_destroy_unused(&req->mini);
+      mini_destroy_unused(&req->mini, did_we_miss);
       req->root_addr = 0;
       return;
    }
 
    int h = 0;
    while (h < req->height || 1 < req->num_edges[h]) {
-      btree_pack_link_extent(req, h, 0);
+      btree_pack_link_extent(req, h, 0, did_we_miss);
       h++;
    }
 
@@ -3216,7 +3227,7 @@ btree_pack_post_loop(btree_pack_req *req, key last_key, bool32 *did_we_miss)
 
    btree_node_full_unlock(cc, cfg, &req->edge[req->height][0]);
 
-   mini_release(&req->mini, last_key);
+   mini_release(&req->mini, last_key, did_we_miss);
 }
 
 static bool32
@@ -3226,7 +3237,7 @@ btree_pack_can_fit_tuple(btree_pack_req *req, key tuple_key, message data)
 }
 
 static void
-btree_pack_abort(btree_pack_req *req)
+btree_pack_abort(btree_pack_req *req, uint32 *did_we_miss)
 {
    for (uint16 i = 0; i <= req->height; i++) {
       for (uint16 j = 0; j < req->num_edges[i]; j++) {
@@ -3238,7 +3249,7 @@ btree_pack_abort(btree_pack_req *req)
                        req->cfg,
                        req->root_addr,
                        NEGATIVE_INFINITY_KEY,
-                       POSITIVE_INFINITY_KEY);
+                       POSITIVE_INFINITY_KEY, did_we_miss);
 }
 
 /*
@@ -3253,7 +3264,7 @@ btree_pack_abort(btree_pack_req *req)
  *-----------------------------------------------------------------------------
  */
 platform_status
-btree_pack(btree_pack_req *req, bool32 *did_we_miss)
+btree_pack(btree_pack_req *req, uint32 *did_we_miss)
 {
    btree_pack_setup_start(req);
 
@@ -3268,19 +3279,19 @@ btree_pack(btree_pack_req *req, bool32 *did_we_miss)
                             __func__,
                             req->num_tuples,
                             req->max_tuples);
-         btree_pack_abort(req);
+         btree_pack_abort(req, did_we_miss);
          return STATUS_LIMIT_EXCEEDED;
       }
-      platform_status rc = btree_pack_loop(req, tuple_key, data);
+      platform_status rc = btree_pack_loop(req, tuple_key, data, did_we_miss);
       if (!SUCCESS(rc)) {
          platform_error_log("%s error status: %d\n", __func__, rc.r);
-         btree_pack_abort(req);
+         btree_pack_abort(req, did_we_miss);
          return rc;
       }
       rc = iterator_next(req->itor, did_we_miss);
       if (!SUCCESS(rc)) {
          platform_error_log("%s error status: %d\n", __func__, rc.r);
-         btree_pack_abort(req);
+         btree_pack_abort(req, did_we_miss);
          return rc;
       }
    }
@@ -3300,7 +3311,7 @@ btree_get_rank(cache             *cc,
                uint64             root_addr,
                key                target,
                btree_pivot_stats *stats,
-               bool32            *did_we_miss)
+               uint32 *did_we_miss)
 {
    btree_node leaf;
 
@@ -3326,7 +3337,7 @@ btree_count_in_range(cache             *cc,
                      key                min_key,
                      key                max_key,
                      btree_pivot_stats *stats,
-                     bool32            *did_we_miss)
+                     uint32 *did_we_miss)
 {
    btree_pivot_stats min_stats;
 
@@ -3355,7 +3366,7 @@ btree_count_in_range_by_iterator(cache             *cc,
                                  key                min_key,
                                  key                max_key,
                                  btree_pivot_stats *stats,
-                                 bool32            *did_we_miss)
+                                 uint32 *did_we_miss)
 {
    btree_iterator btree_itor;
    iterator      *itor = &btree_itor.super;
@@ -3570,7 +3581,7 @@ btree_print_node(platform_log_handle *log_handle,
                  btree_config        *cfg,
                  btree_node          *node,
                  page_type            type,
-                 bool32              *did_we_miss)
+                 uint32 *did_we_miss)
 {
    if (!allocator_page_valid(cache_get_allocator(cc), node->addr)) {
       platform_log(log_handle, "*******************\n");
@@ -3590,7 +3601,7 @@ btree_print_subtree(platform_log_handle *log_handle,
                     btree_config        *cfg,
                     uint64               addr,
                     page_type            type,
-                    bool32              *did_we_miss)
+                    uint32 *did_we_miss)
 {
    btree_node node;
    node.addr = addr;
@@ -3644,7 +3655,7 @@ btree_print_memtable_tree(platform_log_handle *log_handle,
                           cache               *cc,
                           btree_config        *cfg,
                           uint64               root_addr,
-                          bool32              *did_we_miss)
+                          uint32 *did_we_miss)
 {
    btree_print_subtree(log_handle, cc, cfg, root_addr, PAGE_TYPE_MEMTABLE, did_we_miss);
 }
@@ -3660,7 +3671,7 @@ btree_print_tree(platform_log_handle *log_handle,
                  btree_config        *cfg,
                  uint64               root_addr,
                  page_type            type,
-                 bool32              *did_we_miss)
+                 uint32 *did_we_miss)
 {
    btree_print_subtree(log_handle, cc, cfg, root_addr, type, did_we_miss);
 }
@@ -3670,7 +3681,7 @@ btree_print_tree_stats(platform_log_handle *log_handle,
                        cache               *cc,
                        btree_config        *cfg,
                        uint64               addr,
-                       bool32              *did_we_miss)
+                       uint32 *did_we_miss)
 {
    btree_node node;
    node.addr = addr;
@@ -3692,11 +3703,12 @@ btree_space_use_in_range(cache        *cc,
                          uint64        root_addr,
                          page_type     type,
                          key           start_key,
-                         key           end_key)
+                         key           end_key,
+                         uint32 *did_we_miss)
 {
    uint64 meta_head    = btree_root_to_meta_addr(cfg, root_addr, 0);
    uint64 extents_used = mini_keyed_extent_count(
-      cc, cfg->data_cfg, type, meta_head, start_key, end_key);
+      cc, cfg->data_cfg, type, meta_head, start_key, end_key, did_we_miss);
    return extents_used * btree_extent_size(cfg);
 }
 
@@ -3706,7 +3718,7 @@ btree_verify_node(cache        *cc,
                   uint64        addr,
                   page_type     type,
                   bool32        is_left_edge,
-                  bool32       *did_we_miss)
+                  uint32 *did_we_miss)
 {
    btree_node node;
    node.addr = addr;
@@ -3835,7 +3847,7 @@ out:
 }
 
 bool32
-btree_verify_tree(cache *cc, btree_config *cfg, uint64 addr, page_type type, bool32 *did_we_miss)
+btree_verify_tree(cache *cc, btree_config *cfg, uint64 addr, page_type type, uint32 *did_we_miss)
 {
    return btree_verify_node(cc, cfg, addr, type, TRUE, did_we_miss);
 }
@@ -3846,7 +3858,7 @@ btree_print_lookup(cache        *cc,        // IN
                    uint64        root_addr, // IN
                    page_type     type,      // IN
                    key           target,    // IN
-                   bool32       *did_we_miss) // OUT
+                   uint32 *did_we_miss) // OUT
 {
    btree_node node, child_node;
    uint32     h;

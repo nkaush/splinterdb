@@ -215,7 +215,7 @@ memtable_insert(memtable_context *ctxt,
                 key               tuple_key,
                 message           msg,
                 uint64           *leaf_generation,
-                bool32           *did_we_miss)
+                uint32 *did_we_miss)
 {
    const threadid tid = platform_get_tid();
    bool32         was_unique;
@@ -247,11 +247,11 @@ memtable_insert(memtable_context *ctxt,
  * transition to READY
  */
 bool32
-memtable_dec_ref_maybe_recycle(memtable_context *ctxt, memtable *mt)
+memtable_dec_ref_maybe_recycle(memtable_context *ctxt, memtable *mt, uint32 *did_we_miss)
 {
    cache *cc = ctxt->cc;
 
-   bool32 freed = btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE);
+   bool32 freed = btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE, did_we_miss);
    if (freed) {
       platform_assert(mt->state == MEMTABLE_STATE_INCORPORATED);
       mt->root_addr = btree_create(cc, mt->cfg, &mt->mini, PAGE_TYPE_MEMTABLE);
@@ -294,11 +294,11 @@ memtable_init(memtable *mt, cache *cc, memtable_config *cfg, uint64 generation)
 }
 
 void
-memtable_deinit(cache *cc, memtable *mt)
+memtable_deinit(cache *cc, memtable *mt, uint32 *did_we_miss)
 {
-   mini_release(&mt->mini, NULL_KEY);
+   mini_release(&mt->mini, NULL_KEY, did_we_miss);
    debug_only bool32 freed =
-      btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE);
+      btree_dec_ref(cc, mt->cfg, mt->root_addr, PAGE_TYPE_MEMTABLE, did_we_miss);
    debug_assert(freed);
 }
 
@@ -337,11 +337,11 @@ memtable_context_create(platform_heap_id hid,
 }
 
 void
-memtable_context_destroy(platform_heap_id hid, memtable_context *ctxt)
+memtable_context_destroy(platform_heap_id hid, memtable_context *ctxt, uint32 *did_we_miss)
 {
    cache *cc = ctxt->cc;
    for (uint64 mt_no = 0; mt_no < ctxt->cfg.max_memtables; mt_no++) {
-      memtable_deinit(cc, &ctxt->mt[mt_no]);
+      memtable_deinit(cc, &ctxt->mt[mt_no], did_we_miss);
    }
 
    platform_mutex_destroy(&ctxt->incorporation_mutex);

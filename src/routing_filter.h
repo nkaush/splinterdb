@@ -96,14 +96,16 @@ routing_filter_add(cache          *cc,
                    routing_filter *filter,
                    uint32         *new_fp_arr,
                    uint64          num_new_fingerprints,
-                   uint16          value);
+                   uint16          value,
+                   uint32 *did_we_miss);
 
 platform_status
 routing_filter_lookup(cache          *cc,
                       routing_config *cfg,
                       routing_filter *filter,
                       key             target,
-                      uint64         *found_values);
+                      uint64         *found_values,
+                      uint32 *did_we_miss);
 
 static inline uint16
 routing_filter_get_next_value(uint64 found_values, uint16 last_value)
@@ -154,10 +156,11 @@ routing_filter_lookup_async(cache              *cc,
                             routing_filter     *filter,
                             key                 target,
                             uint64             *found_values,
-                            routing_async_ctxt *ctxt);
+                            routing_async_ctxt *ctxt,
+                            uint32 *did_we_miss);
 
 void
-routing_filter_zap(cache *cc, routing_filter *filter);
+routing_filter_zap(cache *cc, routing_filter *filter, uint32 *did_we_miss);
 
 uint32
 routing_filter_estimate_unique_keys_from_count(routing_config *cfg,
@@ -172,7 +175,8 @@ routing_filter_estimate_unique_fp(cache           *cc,
                                   routing_config  *cfg,
                                   platform_heap_id hid,
                                   routing_filter  *filter,
-                                  uint64           num_filters);
+                                  uint64           num_filters,
+                                  uint32 *did_we_miss);
 
 // Debug functions
 
@@ -181,7 +185,8 @@ routing_filter_verify(cache          *cc,
                       routing_config *cfg,
                       routing_filter *filter,
                       uint16          value,
-                      iterator       *itor);
+                      iterator       *itor,
+                      uint32 *did_we_miss);
 
 void
-routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter);
+routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter, uint32 *did_we_miss);

@@ -437,20 +437,21 @@ splinterdb_create_or_open(const splinterdb_config *kvs_cfg,      // IN
    }
 
    kvs->trunk_id = 1;
+   uint32 unused_did_we_miss = 0;
    if (open_existing) {
       kvs->spl = trunk_mount(&kvs->trunk_cfg,
                              (allocator *)&kvs->allocator_handle,
                              (cache *)&kvs->cache_handle,
                              kvs->task_sys,
                              kvs->trunk_id,
-                             kvs->heap_id);
+                             kvs->heap_id, &unused_did_we_miss);
    } else {
       kvs->spl = trunk_create(&kvs->trunk_cfg,
                               (allocator *)&kvs->allocator_handle,
                               (cache *)&kvs->cache_handle,
                               kvs->task_sys,
                               kvs->trunk_id,
-                              kvs->heap_id);
+                              kvs->heap_id, &unused_did_we_miss);
    }
    if (kvs->spl == NULL) {
       platform_error_log("Failed to %s SplinterDB instance.\n",
@@ -533,7 +534,8 @@ splinterdb_close(splinterdb **kvs_in) // IN
     * order when these sub-systems were init'ed when a Splinter device was
     * created or re-opened. Otherwise, asserts will trip.
     */
-   trunk_unmount(&kvs->spl);
+   uint32 unused_did_we_miss = 0;
+   trunk_unmount(&kvs->spl, &unused_did_we_miss);
    clockcache_deinit(&kvs->cache_handle);
    rc_allocator_unmount(&kvs->allocator_handle);
    task_system_destroy(kvs->heap_id, &kvs->task_sys);
@@ -617,12 +619,13 @@ splinterdb_deregister_thread(splinterdb *kvs)
 static int
 splinterdb_insert_message(const splinterdb *kvs,      // IN
                           slice             user_key, // IN
-                          message           msg       // IN
+                          message           msg,      // IN
+                          uint32 *did_we_miss
 )
 {
    key tuple_key = key_create_from_slice(user_key);
    platform_assert(kvs != NULL);
-   platform_status status = trunk_insert(kvs->spl, tuple_key, msg);
+   platform_status status = trunk_insert(kvs->spl, tuple_key, msg, did_we_miss);
    return platform_status_to_int(status);
 }
 
@@ -630,13 +633,31 @@ int
 splinterdb_insert(const splinterdb *kvsb, slice user_key, slice value)
 {
    message msg = message_create(MESSAGE_TYPE_INSERT, value);
-   return splinterdb_insert_message(kvsb, user_key, msg);
+   const threadid tid = platform_get_tid();
+   uint32 did_we_miss = 0;
+   
+   int rc = splinterdb_insert_message(kvsb, user_key, msg, &did_we_miss);
+   if (did_we_miss > 0) {
+      cache_stats* stats = (cache_stats*) &kvsb->cache_handle.stats[tid];
+      stats->ops_incurring_miss += 1;
+   }
+
+   return rc;
 }
 
 int
 splinterdb_delete(const splinterdb *kvsb, slice user_key)
 {
-   return splinterdb_insert_message(kvsb, user_key, DELETE_MESSAGE);
+   const threadid tid = platform_get_tid();
+   uint32 did_we_miss = 0;
+   
+   int rc = splinterdb_insert_message(kvsb, user_key, DELETE_MESSAGE, &did_we_miss);
+   if (did_we_miss > 0) {
+      cache_stats* stats = (cache_stats*) &kvsb->cache_handle.stats[tid];
+      stats->ops_incurring_miss += 1;
+   }
+
+   return rc;
 }
 
 int
@@ -644,7 +665,16 @@ splinterdb_update(const splinterdb *kvsb, slice user_key, slice update)
 {
    message msg = message_create(MESSAGE_TYPE_UPDATE, update);
    platform_assert(kvsb->data_cfg->merge_tuples);
-   return splinterdb_insert_message(kvsb, user_key, msg);
+   const threadid tid = platform_get_tid();
+   uint32 did_we_miss = 0;
+
+   int rc =  splinterdb_insert_message(kvsb, user_key, msg, &did_we_miss);
+   if (did_we_miss > 0) {
+      cache_stats* stats = (cache_stats*) &kvsb->cache_handle.stats[tid];
+      stats->ops_incurring_miss += 1;
+   }
+
+   return rc;
 }
 
 /*
@@ -738,7 +768,16 @@ splinterdb_lookup(const splinterdb         *kvs, // IN
    key                        target  = key_create_from_slice(user_key);
 
    platform_assert(kvs != NULL);
-   status = trunk_lookup(kvs->spl, target, &_result->value);
+
+   const threadid tid = platform_get_tid();
+   uint32 did_we_miss = 0;
+
+   status = trunk_lookup(kvs->spl, target, &_result->value, &did_we_miss);
+   if (did_we_miss > 0) {
+      cache_stats* stats = (cache_stats*) &kvs->cache_handle.stats[tid];
+      stats->ops_incurring_miss += 1;
+   }
+
    return platform_status_to_int(status);
 }
 
@@ -752,7 +791,8 @@ struct splinterdb_iterator {
 int
 splinterdb_iterator_init(const splinterdb     *kvs,           // IN
                          splinterdb_iterator **iter,          // OUT
-                         slice                 user_start_key // IN
+                         slice                 user_start_key,// IN
+                         uint32 *did_we_miss
 )
 {
    splinterdb_iterator *it = TYPED_MALLOC(kvs->spl->heap_id, it);
@@ -777,7 +817,7 @@ splinterdb_iterator_init(const splinterdb     *kvs,           // IN
                                                   POSITIVE_INFINITY_KEY,
                                                   start_key,
                                                   greater_than_or_equal,
-                                                  UINT64_MAX);
+                                                  UINT64_MAX, did_we_miss);
    if (!SUCCESS(rc)) {
       platform_free(kvs->spl->heap_id, *iter);
       return platform_status_to_int(rc);
@@ -789,10 +829,10 @@ splinterdb_iterator_init(const splinterdb     *kvs,           // IN
 }
 
 void
-splinterdb_iterator_deinit(splinterdb_iterator *iter)
+splinterdb_iterator_deinit(splinterdb_iterator *iter, uint32 *did_we_miss)
 {
    trunk_range_iterator *range_itor = &(iter->sri);
-   trunk_range_iterator_deinit(range_itor);
+   trunk_range_iterator_deinit(range_itor, did_we_miss);
 
    trunk_handle *spl = range_itor->spl;
    platform_free(spl->heap_id, range_itor);
@@ -829,17 +869,17 @@ splinterdb_iterator_can_next(splinterdb_iterator *kvi)
 }
 
 void
-splinterdb_iterator_next(splinterdb_iterator *kvi)
+splinterdb_iterator_next(splinterdb_iterator *kvi, uint32 *did_we_miss)
 {
    iterator *itor = &(kvi->sri.super);
-   kvi->last_rc   = iterator_next(itor);
+   kvi->last_rc   = iterator_next(itor, did_we_miss);
 }
 
 void
-splinterdb_iterator_prev(splinterdb_iterator *kvi)
+splinterdb_iterator_prev(splinterdb_iterator *kvi, uint32 *did_we_miss)
 {
    iterator *itor = &(kvi->sri.super);
-   kvi->last_rc   = iterator_prev(itor);
+   kvi->last_rc   = iterator_prev(itor, did_we_miss);
 }
 
 int
@@ -866,13 +906,15 @@ splinterdb_iterator_get_current(splinterdb_iterator *iter,   // IN
 void
 splinterdb_stats_print_insertion(const splinterdb *kvs)
 {
-   trunk_print_insertion_stats(Platform_default_log_handle, kvs->spl);
+   uint32 unused_did_we_miss = 0;
+   trunk_print_insertion_stats(Platform_default_log_handle, kvs->spl, &unused_did_we_miss);
 }
 
 void
 splinterdb_stats_print_lookup(const splinterdb *kvs)
 {
-   trunk_print_lookup_stats(Platform_default_log_handle, kvs->spl);
+   uint32 unused_did_we_miss = 0;
+   trunk_print_lookup_stats(Platform_default_log_handle, kvs->spl, &unused_did_we_miss);
 }
 
 void

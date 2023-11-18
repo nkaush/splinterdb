@@ -8,7 +8,7 @@
 typedef struct task_system task_system;
 
 typedef void (*task_hook)(task_system *arg);
-typedef void (*task_fn)(void *arg, void *scratch);
+typedef void (*task_fn)(void *arg, void *scratch, uint32 *did_we_miss);
 
 typedef struct task {
    struct task *next;
@@ -227,7 +227,7 @@ task_enqueue(task_system *ts,
  *   threads for that queue is 0.
  */
 platform_status
-task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent);
+task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent, uint32 *did_we_miss);
 
 /*
  * Performs one task if there is one waiting.  Otherwise returns
@@ -235,9 +235,9 @@ task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent);
  * task to run.
  */
 static inline platform_status
-task_perform_one(task_system *ts)
+task_perform_one(task_system *ts, uint32 *did_we_miss)
 {
-   return task_perform_one_if_needed(ts, 0);
+   return task_perform_one_if_needed(ts, 0, did_we_miss);
 }
 
 /*
@@ -246,7 +246,7 @@ task_perform_one(task_system *ts)
  * specifically when you are preparing to shut down the task system.
  */
 void
-task_perform_all(task_system *ts);
+task_perform_all(task_system *ts, uint32 *did_we_miss);
 
 /* TRUE if there are no running or waiting tasks. */
 bool32
@@ -258,7 +258,7 @@ task_system_is_quiescent(task_system *ts);
  * enqueued unless the application does so.
  */
 platform_status
-task_perform_until_quiescent(task_system *ts);
+task_perform_until_quiescent(task_system *ts, uint32 *did_we_miss);
 
 /*
  *Functions for tests and debugging.

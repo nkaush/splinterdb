@@ -466,7 +466,7 @@ task_group_get_next_task(task_group *group)
  * hold lock on group for performance reasons.)
  */
 static platform_status
-task_group_run_task(task_group *group, task *assigned_task)
+task_group_run_task(task_group *group, task *assigned_task, uint32 *did_we_miss)
 {
    const threadid tid = platform_get_tid();
    timestamp      current;
@@ -481,7 +481,7 @@ task_group_run_task(task_group *group, task *assigned_task)
    }
 
    assigned_task->func(assigned_task->arg,
-                       task_system_get_thread_scratch(group->ts, tid));
+                       task_system_get_thread_scratch(group->ts, tid), did_we_miss);
 
    if (group->use_stats) {
       current = platform_timestamp_elapsed(current);
@@ -519,7 +519,8 @@ task_worker_thread(void *arg)
          task_group_unlock(group);
          const threadid tid = platform_get_tid();
          group->stats[tid].total_bg_task_executions++;
-         task_group_run_task(group, task_to_run);
+         uint32 did_we_miss;
+         task_group_run_task(group, task_to_run, &did_we_miss);
          platform_free(group->ts->heap_id, task_to_run);
          rc = task_group_lock(group);
          platform_assert(SUCCESS(rc));
@@ -672,7 +673,7 @@ task_enqueue(task_system *ts,
  * group.
  */
 static platform_status
-task_group_perform_one(task_group *group, uint64 queue_scale_percent)
+task_group_perform_one(task_group *group, uint64 queue_scale_percent, uint32 *did_we_miss)
 {
    platform_status rc;
    task           *assigned_task = NULL;
@@ -710,7 +711,7 @@ task_group_perform_one(task_group *group, uint64 queue_scale_percent)
    if (assigned_task) {
       const threadid tid = platform_get_tid();
       group->stats[tid].total_fg_task_executions++;
-      task_group_run_task(group, assigned_task);
+      task_group_run_task(group, assigned_task, did_we_miss);
       __sync_fetch_and_sub(&group->current_executing_tasks, 1);
       platform_free(group->ts->heap_id, assigned_task);
    } else {
@@ -725,11 +726,11 @@ task_group_perform_one(task_group *group, uint64 queue_scale_percent)
  * queue_scale_percent * num bg threads.
  */
 platform_status
-task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent)
+task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent, uint32 *did_we_miss)
 {
    platform_status rc = STATUS_OK;
    for (task_type type = TASK_TYPE_FIRST; type != NUM_TASK_TYPES; type++) {
-      rc = task_group_perform_one(&ts->group[type], queue_scale_percent);
+      rc = task_group_perform_one(&ts->group[type], queue_scale_percent, did_we_miss);
       /* STATUS_TIMEDOUT means no task was waiting. */
       if (STATUS_IS_NE(rc, STATUS_TIMEDOUT)) {
          return rc;
@@ -739,11 +740,11 @@ task_perform_one_if_needed(task_system *ts, uint64 queue_scale_percent)
 }
 
 void
-task_perform_all(task_system *ts)
+task_perform_all(task_system *ts, uint32 *did_we_miss)
 {
    platform_status rc;
    do {
-      rc = task_perform_one(ts);
+      rc = task_perform_one(ts, did_we_miss);
       debug_assert(SUCCESS(rc) || STATUS_IS_EQ(rc, STATUS_TIMEDOUT));
       /* STATUS_TIMEDOUT means no task was waiting. */
    } while (STATUS_IS_NE(rc, STATUS_TIMEDOUT));
@@ -784,11 +785,11 @@ cleanup:
 }
 
 platform_status
-task_perform_until_quiescent(task_system *ts)
+task_perform_until_quiescent(task_system *ts, uint32 *did_we_miss)
 {
    uint64 wait = 1;
    while (!task_system_is_quiescent(ts)) {
-      platform_status rc = task_perform_one(ts);
+      platform_status rc = task_perform_one(ts, did_we_miss);
       if (SUCCESS(rc)) {
          wait = 1;
       } else if (STATUS_IS_EQ(rc, STATUS_TIMEDOUT)) {

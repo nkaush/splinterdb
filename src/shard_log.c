@@ -22,7 +22,7 @@
 static uint64 shard_log_magic_idx = 0;
 
 int
-shard_log_write(log_handle *log, key tuple_key, message msg, uint64 generation);
+shard_log_write(log_handle *log, key tuple_key, message msg, uint64 generation, uint32 *did_we_miss);
 uint64
 shard_log_addr(log_handle *log);
 uint64
@@ -44,7 +44,7 @@ shard_log_iterator_can_prev(iterator *itor);
 bool32
 shard_log_iterator_can_next(iterator *itor);
 platform_status
-shard_log_iterator_next(iterator *itor);
+shard_log_iterator_next(iterator *itor, uint32 *);
 
 
 const static iterator_ops shard_log_iterator_ops = {
@@ -81,9 +81,9 @@ shard_log_get_thread_data(shard_log *log, threadid thr_id)
 }
 
 page_handle *
-shard_log_alloc(shard_log *log, uint64 *next_extent)
+shard_log_alloc(shard_log *log, uint64 *next_extent, uint32 *did_we_miss)
 {
-   uint64 addr = mini_alloc(&log->mini, 0, NULL_KEY, next_extent);
+   uint64 addr = mini_alloc(&log->mini, 0, NULL_KEY, next_extent, did_we_miss);
    return cache_alloc(log->cc, addr, PAGE_TYPE_LOG);
 }
 
@@ -125,7 +125,7 @@ shard_log_init(shard_log *log, cache *cc, shard_log_config *cfg)
 }
 
 void
-shard_log_zap(shard_log *log)
+shard_log_zap(shard_log *log, uint32 *did_we_miss)
 {
    cache *cc = log->cc;
 
@@ -135,7 +135,7 @@ shard_log_zap(shard_log *log)
       thread_data->offset                = 0;
    }
 
-   mini_unkeyed_dec_ref(cc, log->meta_head, PAGE_TYPE_LOG, FALSE);
+   mini_unkeyed_dec_ref(cc, log->meta_head, PAGE_TYPE_LOG, FALSE, did_we_miss);
 }
 
 /*
@@ -199,11 +199,12 @@ log_entry_next(log_entry *le)
 static int
 get_new_page_for_thread(shard_log             *log,
                         shard_log_thread_data *thread_data,
-                        page_handle          **page)
+                        page_handle          **page,
+                        uint32 *did_we_miss)
 {
    uint64 next_extent;
 
-   *page                 = shard_log_alloc(log, &next_extent);
+   *page                 = shard_log_alloc(log, &next_extent, did_we_miss);
    thread_data->addr     = (*page)->disk_addr;
    shard_log_hdr *hdr    = (shard_log_hdr *)(*page)->data;
    hdr->magic            = log->magic;
@@ -214,7 +215,7 @@ get_new_page_for_thread(shard_log             *log,
 }
 
 int
-shard_log_write(log_handle *logh, key tuple_key, message msg, uint64 generation)
+shard_log_write(log_handle *logh, key tuple_key, message msg, uint64 generation, uint32 *did_we_miss)
 {
    debug_assert(key_is_user_key(tuple_key));
 
@@ -225,11 +226,11 @@ shard_log_write(log_handle *logh, key tuple_key, message msg, uint64 generation)
 
    page_handle *page;
    if (thread_data->addr == SHARD_UNMAPPED) {
-      if (get_new_page_for_thread(log, thread_data, &page)) {
+      if (get_new_page_for_thread(log, thread_data, &page, did_we_miss)) {
          return -1;
       }
    } else {
-      page        = cache_get(cc, thread_data->addr, TRUE, PAGE_TYPE_LOG);
+      page        = cache_get(cc, thread_data->addr, TRUE, PAGE_TYPE_LOG, did_we_miss);
       uint64 wait = 1;
       while (!cache_try_claim(cc, page)) {
          platform_sleep_ns(wait);
@@ -256,7 +257,7 @@ shard_log_write(log_handle *logh, key tuple_key, message msg, uint64 generation)
       cache_page_sync(cc, page, FALSE, PAGE_TYPE_LOG);
       cache_unget(cc, page);
 
-      if (get_new_page_for_thread(log, thread_data, &page)) {
+      if (get_new_page_for_thread(log, thread_data, &page, did_we_miss)) {
          return -1;
       }
       cursor = (log_entry *)(page->data + thread_data->offset);
@@ -339,7 +340,8 @@ shard_log_iterator_init(cache              *cc,
                         platform_heap_id    hid,
                         uint64              addr,
                         uint64              magic,
-                        shard_log_iterator *itor)
+                        shard_log_iterator *itor,
+                        uint32 *did_we_miss)
 {
    page_handle *page;
    uint64       i;
@@ -361,7 +363,7 @@ shard_log_iterator_init(cache              *cc,
       next_extent_addr = 0;
       for (i = 0; i < pages_per_extent; i++) {
          page_addr = extent_addr + i * shard_log_page_size(cfg);
-         page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG);
+         page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG, did_we_miss);
          if (!shard_log_valid(cfg, page, magic)) {
             cache_unget(cc, page);
             goto finished_first_pass;
@@ -389,7 +391,7 @@ finished_first_pass:
       next_extent_addr = 0;
       for (i = 0; i < pages_per_extent; i++) {
          page_addr = extent_addr + i * shard_log_page_size(cfg);
-         page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG);
+         page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG, did_we_miss);
          if (!shard_log_valid(cfg, page, magic)) {
             cache_unget(cc, page);
             goto finished_second_pass;
@@ -454,7 +456,7 @@ shard_log_iterator_can_next(iterator *itorh)
 }
 
 platform_status
-shard_log_iterator_next(iterator *itorh)
+shard_log_iterator_next(iterator *itorh, uint32 *did_we_miss)
 {
    shard_log_iterator *itor = (shard_log_iterator *)itorh;
    itor->pos++;
@@ -480,7 +482,7 @@ shard_log_config_init(shard_log_config *log_cfg,
 }
 
 void
-shard_log_print(shard_log *log)
+shard_log_print(shard_log *log, uint32 *did_we_miss)
 {
    cache            *cc               = log->cc;
    uint64            extent_addr      = log->addr;
@@ -495,7 +497,7 @@ shard_log_print(shard_log *log)
       uint64 next_extent_addr = 0;
       for (uint64 i = 0; i < pages_per_extent; i++) {
          uint64       page_addr = extent_addr + i * shard_log_page_size(cfg);
-         page_handle *page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG);
+         page_handle *page      = cache_get(cc, page_addr, TRUE, PAGE_TYPE_LOG, did_we_miss);
          if (shard_log_valid(cfg, page, magic)) {
             next_extent_addr = shard_log_next_extent_addr(cfg, page);
             for (log_entry *le = first_log_entry(page->data);
