@@ -4,6 +4,7 @@
 #ifndef PLATFORM_LINUX_INLINE_H
 #define PLATFORM_LINUX_INLINE_H
 
+#include <unistd.h>
 #include <laio.h>
 #include <string.h> // for memcpy, strerror
 #include <time.h>   // for nanosecond sleep api.
@@ -110,12 +111,21 @@ platform_semaphore_destroy(platform_semaphore *sema)
    debug_assert(!err);
 }
 
+/*
+ * Ref: https://man7.org/linux/man-pages/man3/sem_init.3.html
+ * for choice of 'pshared' arg to sem_init().
+ */
 static inline void
 platform_semaphore_init(platform_semaphore *sema,
                         int                 value,
-                        platform_heap_id    UNUSED_PARAM(heap_id))
+                        platform_heap_id    heap_id)
 {
-   __attribute__((unused)) int err = sem_init(sema, 0, value);
+   // If we are running with a shared segment, it's likely that we
+   // may also fork child processes attaching to Splinter's shmem.
+   // Then, use 1 => spinlocks are shared across process boundaries.
+   // Else, use 0 => spinlocks are shared between threads in a process.
+   __attribute__((unused)) int err =
+      sem_init(sema, ((heap_id == PROCESS_PRIVATE_HEAP_ID) ? 0 : 1), value);
    debug_assert(!err);
 }
 
@@ -215,6 +225,12 @@ platform_set_tid(threadid t)
    xxxtid = t;
 }
 
+static inline int
+platform_getpid()
+{
+   return getpid();
+}
+
 static inline void
 platform_yield()
 {}
@@ -266,7 +282,7 @@ platform_close_log_stream(platform_stream_handle *stream,
    fputs(stream->str, log_handle);
    fflush(log_handle);
    platform_free_from_heap(
-      NULL, stream->str, "stream", __FUNCTION__, __FILE__, __LINE__);
+      NULL, stream->str, "stream", __func__, __FILE__, __LINE__);
 }
 
 static inline platform_log_handle *
