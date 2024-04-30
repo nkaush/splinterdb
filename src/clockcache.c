@@ -1335,6 +1335,8 @@ clockcache_batch_start_writeback(clockcache *cc, uint64 batch, bool32 is_urgent)
                          start_entry_no,
                          end_entry_no - 1);
 
+   uint64 page_size = clockcache_page_size(cc);
+
    allocator_config *allocator_cfg = allocator_get_config(cc->al);
    // Iterate through the entries in the batch and try to write out the extents.
    for (entry_no = start_entry_no; entry_no < end_entry_no; entry_no++) {
@@ -1348,7 +1350,7 @@ clockcache_batch_start_writeback(clockcache *cc, uint64 batch, bool32 is_urgent)
          first_addr = entry->page.disk_addr;
          // walk backwards through extent to find first cleanable entry
          do {
-            first_addr -= clockcache_page_size(cc);
+            first_addr -= page_size;
             if (allocator_config_pages_share_extent(
                    allocator_cfg, first_addr, addr))
                next_entry_no = clockcache_lookup(cc, first_addr);
@@ -1357,11 +1359,11 @@ clockcache_batch_start_writeback(clockcache *cc, uint64 batch, bool32 is_urgent)
          } while (
             next_entry_no != CC_UNMAPPED_ENTRY
             && clockcache_try_set_writeback(cc, next_entry_no, is_urgent));
-         first_addr += clockcache_page_size(cc);
+         first_addr += page_size;
          end_addr = entry->page.disk_addr;
          // walk forwards through extent to find last cleanable entry
          do {
-            end_addr += clockcache_page_size(cc);
+            end_addr += page_size;
             if (allocator_config_pages_share_extent(
                    allocator_cfg, end_addr, addr))
                next_entry_no = clockcache_lookup(cc, end_addr);
@@ -1685,7 +1687,7 @@ void
 clockcache_flush(clockcache *cc)
 {
    // make sure all aio is complete first
-   io_cleanup_all(cc->io);
+   io_wait_all(cc->io);
 
    // there can be no references or pins or things won't flush
    // clockcache_assert_no_locks_held(cc); // take out for performance
@@ -1694,10 +1696,12 @@ clockcache_flush(clockcache *cc)
    for (uint32 flush_hand = 0;
         flush_hand < cc->cfg->page_capacity / CC_ENTRIES_PER_BATCH;
         flush_hand++)
+   {
       clockcache_batch_start_writeback(cc, flush_hand, TRUE);
+   }
 
    // make sure all aio is complete again
-   io_cleanup_all(cc->io);
+   io_wait_all(cc->io);
 
    debug_assert(clockcache_assert_clean(cc));
 }
@@ -2095,7 +2099,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
                         page_type     type,     // IN
                         page_handle **page)     // OUT
 {
-   debug_only uint64 page_size = clockcache_page_size(cc);
+   uint64 page_size = clockcache_page_size(cc);
    debug_assert(
       ((addr % page_size) == 0), "addr=%lu, page_size=%lu\n", addr, page_size);
    uint32            entry_number = CC_UNMAPPED_ENTRY;
@@ -2228,7 +2232,7 @@ clockcache_get_internal(clockcache   *cc,       // IN
       start = platform_get_timestamp();
    }
 
-   status = io_read(cc->io, entry->page.data, clockcache_page_size(cc), addr);
+   status = io_read(cc->io, entry->page.data, page_size, addr);
    platform_assert_status_ok(status);
 
    if (cc->cfg->use_stats) {
@@ -2854,6 +2858,7 @@ clockcache_prefetch_callback(void           *metadata,
    platform_assert(count > 0);
    platform_assert(count <= cc->cfg->pages_per_extent);
 
+   debug_code(uint64 page_size = clockcache_page_size(cc));
    for (uint64 page_off = 0; page_off < count; page_off++) {
       uint32 entry_no =
          clockcache_data_to_entry_number(cc, (char *)iovec[page_off].iov_base);
@@ -2870,7 +2875,7 @@ clockcache_prefetch_callback(void           *metadata,
       debug_code(int64 addr = entry->page.disk_addr);
       debug_assert(addr != CC_UNMAPPED_ADDR);
       debug_assert(last_addr == CC_UNMAPPED_ADDR
-                   || addr == last_addr + clockcache_page_size(cc));
+                   || addr == last_addr + page_size);
       debug_code(last_addr = addr);
       debug_assert(entry_no == clockcache_lookup(cc, addr));
    }

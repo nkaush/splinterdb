@@ -50,11 +50,12 @@ TESTSRC := $(COMMON_TESTSRC) $(FUNCTIONAL_TESTSRC) $(UNIT_TESTSRC)
 #  - Slow unit-tests will be skipped, as we want the resulting unit_test binary
 #    to run as fast as it can.
 #  - Skip tests that are to be invoked with specialized command-line arguments.
+#
 # These tests which are skipped will have to be run stand-alone.
 # Construct a list of fast unit-tests that will be linked into unit_test binary,
 # eliminating a sequence of slow-running unit-test programs.
 ALL_UNIT_TESTSRC := $(call rwildcard, $(UNIT_TESTSDIR), *.c)
-SLOW_UNIT_TESTSRC = splinter_test.c config_parse_test.c large_inserts_bugs_stress_test.c
+SLOW_UNIT_TESTSRC = splinter_test.c config_parse_test.c large_inserts_stress_test.c splinterdb_forked_child_test.c
 SLOW_UNIT_TESTSRC_FILTER := $(foreach slowf,$(SLOW_UNIT_TESTSRC), $(UNIT_TESTSDIR)/$(slowf))
 FAST_UNIT_TESTSRC := $(sort $(filter-out $(SLOW_UNIT_TESTSRC_FILTER), $(ALL_UNIT_TESTSRC)))
 
@@ -71,7 +72,7 @@ INCLUDE = -I $(INCDIR) -I $(SRCDIR) -I $(SRCDIR)/platform_$(PLATFORM) -I $(TESTS
 
 # use += here, so that extra flags can be provided via the environment
 
-CFLAGS += -D_GNU_SOURCE -ggdb3 -Wall -pthread -Wfatal-errors -Werror -Wvla
+CFLAGS += -D_GNU_SOURCE -ggdb -Wall -pthread -Wfatal-errors -Werror -Wvla
 CFLAGS += -DXXH_STATIC_LINKING_ONLY -fPIC
 CFLAGS += -DSPLINTERDB_PLATFORM_DIR=$(PLATFORM_DIR)
 
@@ -86,7 +87,7 @@ ifeq ($(cpu_arch),x86_64)
   CFLAGS += -march=native
 endif
 
-LDFLAGS += -ggdb3 -pthread
+LDFLAGS += -ggdb -pthread
 
 LIBS      = -lm -lpthread -laio -lxxhash
 DEPFLAGS  = -MMD -MP
@@ -443,8 +444,7 @@ $(BINDIR)/$(UNITDIR)/splinterdb_stress_test: $(COMMON_TESTOBJ)                  
                                              $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
                                              $(LIBDIR)/libsplinterdb.so
 
-$(BINDIR)/$(UNITDIR)/writable_buffer_test: $(UTIL_SYS)            \
-                                           $(COMMON_TESTOBJ)      \
+$(BINDIR)/$(UNITDIR)/writable_buffer_test: $(COMMON_TESTOBJ)      \
                                            $(COMMON_UNIT_TESTOBJ) \
                                            $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
                                            $(LIBDIR)/libsplinterdb.so
@@ -454,33 +454,36 @@ $(BINDIR)/$(UNITDIR)/limitations_test: $(COMMON_TESTOBJ)                        
                                        $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
                                        $(LIBDIR)/libsplinterdb.so
 
-$(BINDIR)/$(UNITDIR)/config_parse_test: $(UTIL_SYS)                                   \
-                                        $(COMMON_TESTOBJ)                             \
+$(BINDIR)/$(UNITDIR)/config_parse_test: $(COMMON_TESTOBJ)                             \
                                         $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
                                         $(COMMON_UNIT_TESTOBJ)                        \
                                         $(LIBDIR)/libsplinterdb.so
 
-$(BINDIR)/$(UNITDIR)/task_system_test: $(UTIL_SYS)                                   \
-                                       $(COMMON_TESTOBJ)                             \
+$(BINDIR)/$(UNITDIR)/task_system_test: $(COMMON_TESTOBJ)                             \
                                        $(COMMON_UNIT_TESTOBJ)                        \
                                        $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
                                        $(LIBDIR)/libsplinterdb.so
 
-$(BINDIR)/$(UNITDIR)/platform_apis_test: $(UTIL_SYS)               \
-                                         $(COMMON_UNIT_TESTOBJ)    \
+$(BINDIR)/$(UNITDIR)/platform_apis_test: $(UTIL_SYS)                        \
+                                         $(COMMON_UNIT_TESTOBJ)             \
+                                         $(OBJDIR)/$(TESTS_DIR)/config.o    \
                                          $(PLATFORM_SYS)
 
-$(BINDIR)/$(UNITDIR)/splinter_shmem_test: $(UTIL_SYS)            \
-                                          $(COMMON_UNIT_TESTOBJ) \
+$(BINDIR)/$(UNITDIR)/splinter_shmem_test: $(COMMON_UNIT_TESTOBJ) \
                                           $(LIBDIR)/libsplinterdb.so
 
 $(BINDIR)/$(UNITDIR)/splinter_ipc_test: $(UTIL_SYS)            \
                                         $(COMMON_UNIT_TESTOBJ)
 
-$(BINDIR)/$(UNITDIR)/large_inserts_bugs_stress_test: $(UTIL_SYS)                      \
-                                                     $(OBJDIR)/$(TESTS_DIR)/config.o  \
-                                                     $(COMMON_UNIT_TESTOBJ)           \
-                                                     $(LIBDIR)/libsplinterdb.so
+$(BINDIR)/$(UNITDIR)/splinterdb_forked_child_test: $(OBJDIR)/$(TESTS_DIR)/config.o               \
+                                                   $(COMMON_TESTOBJ)                             \
+                                                   $(COMMON_UNIT_TESTOBJ)                        \
+                                                   $(OBJDIR)/$(FUNCTIONAL_TESTSDIR)/test_async.o \
+                                                   $(LIBDIR)/libsplinterdb.so
+
+$(BINDIR)/$(UNITDIR)/large_inserts_stress_test: $(OBJDIR)/$(TESTS_DIR)/config.o  \
+                                                $(COMMON_UNIT_TESTOBJ)           \
+                                                $(LIBDIR)/libsplinterdb.so
 
 $(BINDIR)/$(UNITDIR)/splinterdb_heap_id_mgmt_test: $(COMMON_TESTOBJ)         \
                                                    $(COMMON_UNIT_TESTOBJ)    \
