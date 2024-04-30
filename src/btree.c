@@ -1876,7 +1876,7 @@ start_over:
                 parent_node.addr,
                 child_node.addr);
 
-   btree_node_get(cc, cfg, &child_node, PAGE_TYPE_MEMTABLE);
+   btree_node_get(cc, cfg, &child_node, PAGE_TYPE_MEMTABLE, did_we_miss);
 
    uint64 height = btree_height(parent_node.hdr);
    while (height > 1) {
