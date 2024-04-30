@@ -72,7 +72,7 @@ platform_status
 shard_log_init(shard_log *log, cache *cc, shard_log_config *cfg);
 
 void
-shard_log_zap(shard_log *log);
+shard_log_zap(shard_log *log, uint32 *did_we_miss);
 
 platform_status
 shard_log_iterator_init(cache              *cc,
@@ -80,7 +80,8 @@ shard_log_iterator_init(cache              *cc,
                         platform_heap_id    hid,
                         uint64              addr,
                         uint64              magic,
-                        shard_log_iterator *itor);
+                        shard_log_iterator *itor,
+                        uint32 *did_we_miss);
 
 void
 shard_log_iterator_deinit(platform_heap_id hid, shard_log_iterator *itor);
@@ -90,4 +91,4 @@ shard_log_config_init(shard_log_config *log_cfg,
                       cache_config     *cache_cfg,
                       data_config      *data_cfg);
 void
-shard_log_print(shard_log *log);
+shard_log_print(shard_log *log, uint32 *did_we_miss);

@@ -170,17 +170,18 @@ routing_get_header(cache          *cc,
                    routing_config *cfg,
                    uint64          filter_addr,
                    uint64          index,
-                   page_handle   **filter_page)
+                   page_handle   **filter_page,
+                   uint32 *did_we_miss)
 {
    uint64 page_size      = cache_config_page_size(cfg->cache_cfg);
    uint64 addrs_per_page = page_size / sizeof(uint64);
    debug_assert(index / addrs_per_page < 32);
    uint64       index_addr = filter_addr + page_size * (index / addrs_per_page);
-   page_handle *index_page = cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER);
+   page_handle *index_page = cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER, did_we_miss);
    uint64 hdr_raw_addr = ((uint64 *)index_page->data)[index % addrs_per_page];
    platform_assert(hdr_raw_addr != 0);
    uint64 header_addr      = hdr_raw_addr - (hdr_raw_addr % page_size);
-   *filter_page            = cache_get(cc, header_addr, TRUE, PAGE_TYPE_FILTER);
+   *filter_page            = cache_get(cc, header_addr, TRUE, PAGE_TYPE_FILTER, did_we_miss);
    uint64       header_off = hdr_raw_addr - header_addr;
    routing_hdr *hdr        = (routing_hdr *)((*filter_page)->data + header_off);
    cache_unget(cc, index_page);
@@ -329,7 +330,8 @@ routing_filter_add(cache          *cc,
                    routing_filter *filter,
                    uint32         *new_fp_arr,
                    uint64          num_new_fp,
-                   uint16          value)
+                   uint16          value,
+                   uint32 *did_we_miss)
 {
    ZERO_CONTENTS(filter);
 
@@ -341,7 +343,7 @@ routing_filter_add(cache          *cc,
    uint32 old_value_mask               = 0;
    size_t old_remainder_and_value_size = 0;
    if (old_filter->addr != 0) {
-      mini_unkeyed_prefetch(cc, PAGE_TYPE_FILTER, old_filter->meta_head);
+      mini_unkeyed_prefetch(cc, PAGE_TYPE_FILTER, old_filter->meta_head, did_we_miss);
       old_log_num_buckets = 31 - __builtin_clz(old_filter->num_fingerprints);
       if (old_log_num_buckets < cfg->log_index_size) {
          old_log_num_buckets = cfg->log_index_size;
@@ -427,18 +429,18 @@ routing_filter_add(cache          *cc,
    // set up the index pages
    uint64       addrs_per_page = page_size / sizeof(uint64);
    page_handle *index_page[MAX_PAGES_PER_EXTENT];
-   uint64       index_addr = mini_alloc(&mini, 0, NULL_KEY, NULL);
+   uint64       index_addr = mini_alloc(&mini, 0, NULL_KEY, NULL, did_we_miss);
    platform_assert(index_addr % extent_size == 0);
    index_page[0] = cache_alloc(cc, index_addr, PAGE_TYPE_FILTER);
    for (uint64 i = 1; i < pages_per_extent; i++) {
-      uint64 next_index_addr = mini_alloc(&mini, 0, NULL_KEY, NULL);
+      uint64 next_index_addr = mini_alloc(&mini, 0, NULL_KEY, NULL, did_we_miss);
       platform_assert(next_index_addr == index_addr + i * page_size);
       index_page[i] = cache_alloc(cc, next_index_addr, PAGE_TYPE_FILTER);
    }
    filter->addr = index_addr;
 
    // we write to the filter with the filter cursor
-   uint64       addr          = mini_alloc(&mini, 0, NULL_KEY, NULL);
+   uint64       addr          = mini_alloc(&mini, 0, NULL_KEY, NULL, did_we_miss);
    page_handle *filter_page   = cache_alloc(cc, addr, PAGE_TYPE_FILTER);
    char        *filter_cursor = filter_page->data;
    uint64       bytes_remaining_on_page = page_size;
@@ -485,7 +487,7 @@ routing_filter_add(cache          *cc,
       page_handle *old_filter_node;
       if (old_filter->addr != 0) {
          routing_hdr *old_hdr = routing_get_header(
-            cc, cfg, old_filter->addr, old_index_no, &old_filter_node);
+            cc, cfg, old_filter->addr, old_index_no, &old_filter_node, did_we_miss);
          uint16 header_length = routing_header_length(cfg, old_hdr);
          old_block_start      = (char *)old_hdr + header_length;
          old_index_count      = old_hdr->num_remainders;
@@ -583,7 +585,7 @@ routing_filter_add(cache          *cc,
          uint32 header_size   = encoding_size + sizeof(routing_hdr);
          if (header_size + remainder_block_size > bytes_remaining_on_page) {
             routing_unlock_and_unget_page(cc, filter_page);
-            addr        = mini_alloc(&mini, 0, NULL_KEY, NULL);
+            addr        = mini_alloc(&mini, 0, NULL_KEY, NULL, did_we_miss);
             filter_page = cache_alloc(cc, addr, PAGE_TYPE_FILTER);
 
             bytes_remaining_on_page = page_size;
@@ -629,7 +631,7 @@ routing_filter_add(cache          *cc,
       routing_unlock_and_unget_page(cc, index_page[i]);
    }
 
-   mini_release(&mini, NULL_KEY);
+   mini_release(&mini, NULL_KEY, did_we_miss);
 
    platform_free(PROCESS_PRIVATE_HEAP_ID, temp);
 
@@ -640,7 +642,8 @@ void
 routing_filter_prefetch(cache          *cc,
                         routing_config *cfg,
                         routing_filter *filter,
-                        uint64          num_indices)
+                        uint64          num_indices,
+                        uint32 *did_we_miss)
 {
    uint64 last_extent_addr = 0;
    uint64 page_size        = cache_config_page_size(cfg->cache_cfg);
@@ -652,7 +655,7 @@ routing_filter_prefetch(cache          *cc,
         index_page_no++) {
       uint64       index_addr = filter->addr + (page_size * index_page_no);
       page_handle *index_page =
-         cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER);
+         cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER, did_we_miss);
       platform_assert(index_no < num_indices);
 
       uint64 max_index_no;
@@ -684,7 +687,8 @@ routing_filter_estimate_unique_fp(cache           *cc,
                                   routing_config  *cfg,
                                   platform_heap_id hid,
                                   routing_filter  *filter,
-                                  uint64           num_filters)
+                                  uint64           num_filters,
+                                  uint32 *did_we_miss)
 {
    uint32 total_num_fp = 0;
    for (uint64 i = 0; i != num_filters; i++) {
@@ -721,7 +725,7 @@ routing_filter_estimate_unique_fp(cache           *cc,
          platform_assert(num_indices % 16 == 0);
          num_indices /= 16;
 
-         routing_filter_prefetch(cc, cfg, &filter[i], num_indices);
+         routing_filter_prefetch(cc, cfg, &filter[i], num_indices, did_we_miss);
 
          for (uint32 index_no = 0; index_no < num_indices; index_no++) {
             // process metadata
@@ -729,7 +733,7 @@ routing_filter_estimate_unique_fp(cache           *cc,
             uint16       index_count = 0;
             page_handle *filter_node;
             routing_hdr *hdr = routing_get_header(
-               cc, cfg, filter[i].addr, index_no, &filter_node);
+               cc, cfg, filter[i].addr, index_no, &filter_node, did_we_miss);
             uint16 header_length = routing_header_length(cfg, hdr);
             block_start          = (char *)hdr + header_length;
             index_count          = hdr->num_remainders;
@@ -825,7 +829,8 @@ routing_filter_lookup(cache          *cc,
                       routing_config *cfg,
                       routing_filter *filter,
                       key             target,
-                      uint64         *found_values)
+                      uint64         *found_values,
+                      uint32 *did_we_miss)
 {
    debug_assert(key_is_user_key(target));
 
@@ -859,7 +864,7 @@ routing_filter_lookup(cache          *cc,
 
    page_handle *filter_node;
    routing_hdr *hdr =
-      routing_get_header(cc, cfg, filter->addr, index, &filter_node);
+      routing_get_header(cc, cfg, filter->addr, index, &filter_node, did_we_miss);
    uint64 encoding_size = (hdr->num_remainders + index_size - 1) / 8 + 4;
    uint64 header_length = encoding_size + sizeof(routing_hdr);
 
@@ -994,7 +999,8 @@ routing_filter_lookup_async(cache              *cc,
                             routing_filter     *filter,
                             key                 target,
                             uint64             *found_values,
-                            routing_async_ctxt *ctxt)
+                            routing_async_ctxt *ctxt,
+                            uint32 *did_we_miss)
 {
    cache_async_result res  = 0;
    bool32             done = FALSE;
@@ -1044,7 +1050,7 @@ routing_filter_lookup_async(cache              *cc,
             cache_ctxt_init(
                cc, routing_filter_async_callback, ctxt, cache_ctxt);
             res = cache_get_async(
-               cc, ctxt->page_addr, PAGE_TYPE_FILTER, cache_ctxt);
+               cc, ctxt->page_addr, PAGE_TYPE_FILTER, cache_ctxt, did_we_miss);
             switch (res) {
                case async_locked:
                case async_no_reqs:
@@ -1164,14 +1170,14 @@ routing_filter_lookup_async(cache              *cc,
  *----------------------------------------------------------------------
  */
 void
-routing_filter_zap(cache *cc, routing_filter *filter)
+routing_filter_zap(cache *cc, routing_filter *filter, uint32 *did_we_miss)
 {
    if (filter->num_fingerprints == 0) {
       return;
    }
 
    uint64 meta_head = filter->meta_head;
-   mini_unkeyed_dec_ref(cc, meta_head, PAGE_TYPE_FILTER, FALSE);
+   mini_unkeyed_dec_ref(cc, meta_head, PAGE_TYPE_FILTER, FALSE, did_we_miss);
 }
 
 /*
@@ -1222,7 +1228,8 @@ routing_filter_verify(cache          *cc,
                       routing_config *cfg,
                       routing_filter *filter,
                       uint16          value,
-                      iterator       *itor)
+                      iterator       *itor,
+                      uint32 *did_we_miss)
 {
    while (iterator_can_next(itor)) {
       key     curr_key;
@@ -1231,10 +1238,10 @@ routing_filter_verify(cache          *cc,
       debug_assert(key_is_user_key(curr_key));
       uint64          found_values;
       platform_status rc =
-         routing_filter_lookup(cc, cfg, filter, curr_key, &found_values);
+         routing_filter_lookup(cc, cfg, filter, curr_key, &found_values, did_we_miss);
       platform_assert_status_ok(rc);
       platform_assert(routing_filter_is_value_found(found_values, value));
-      rc = iterator_next(itor);
+      rc = iterator_next(itor, did_we_miss);
       platform_assert_status_ok(rc);
    }
 }
@@ -1259,7 +1266,8 @@ void
 routing_filter_print_index(cache          *cc,
                            routing_config *cfg,
                            uint64          filter_addr,
-                           uint32          num_indices)
+                           uint32          num_indices,
+                           uint32 *did_we_miss)
 {
    uint64 i;
 
@@ -1274,7 +1282,7 @@ routing_filter_print_index(cache          *cc,
       uint64 addrs_per_page = (page_size / sizeof(uint64));
       uint64 index_addr     = filter_addr + (page_size * (i / addrs_per_page));
       page_handle *index_page =
-         cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER);
+         cache_get(cc, index_addr, TRUE, PAGE_TYPE_FILTER, did_we_miss);
       platform_default_log("index 0x%lx: %lu\n",
                            i,
                            ((uint64 *)index_page->data)[i % addrs_per_page]);
@@ -1314,7 +1322,7 @@ routing_filter_print_remainders(routing_config *cfg,
 }
 
 void
-routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter)
+routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter, uint32 *did_we_miss)
 {
    uint64 filter_addr     = filter->addr;
    uint32 log_num_buckets = 31 - __builtin_clz(filter->num_fingerprints);
@@ -1326,7 +1334,7 @@ routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter)
    debug_assert(num_indices > 0);
    uint32 remainder_size = cfg->fingerprint_size - log_num_buckets;
 
-   routing_filter_print_index(cc, cfg, filter_addr, num_indices);
+   routing_filter_print_index(cc, cfg, filter_addr, num_indices, did_we_miss);
    uint64 i;
    size_t value_size = filter->value_size;
    for (i = 0; i < num_indices; i++) {
@@ -1334,7 +1342,7 @@ routing_filter_print(cache *cc, routing_config *cfg, routing_filter *filter)
       platform_default_log("--- Index 0x%lx\n", i);
       page_handle *filter_page;
       routing_hdr *hdr =
-         routing_get_header(cc, cfg, filter_addr, i, &filter_page);
+         routing_get_header(cc, cfg, filter_addr, i, &filter_page, did_we_miss);
       routing_filter_print_encoding(cfg, hdr);
       routing_filter_print_remainders(cfg, hdr, remainder_size, value_size);
       routing_unget_header(cc, filter_page);

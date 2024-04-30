@@ -21,7 +21,8 @@ typedef struct log_config   log_config;
 typedef int (*log_write_fn)(log_handle *log,
                             key         tuple_key,
                             message     data,
-                            uint64      generation);
+                            uint64      generation,
+                            uint32     *did_we_miss);
 typedef void (*log_release_fn)(log_handle *log);
 typedef uint64 (*log_addr_fn)(log_handle *log);
 typedef uint64 (*log_magic_fn)(log_handle *log);
@@ -40,9 +41,9 @@ struct log_handle {
 };
 
 static inline int
-log_write(log_handle *log, key tuple_key, message data, uint64 generation)
+log_write(log_handle *log, key tuple_key, message data, uint64 generation, uint32 *did_we_miss)
 {
-   return log->ops->write(log, tuple_key, data, generation);
+   return log->ops->write(log, tuple_key, data, generation, did_we_miss);
 }
 
 static inline void

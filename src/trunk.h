@@ -331,10 +331,10 @@ typedef struct trunk_async_ctxt {
  */
 
 platform_status
-trunk_insert(trunk_handle *spl, key tuple_key, message data);
+trunk_insert(trunk_handle *spl, key tuple_key, message data, uint32 *did_we_miss);
 
 platform_status
-trunk_lookup(trunk_handle *spl, key target, merge_accumulator *result);
+trunk_lookup(trunk_handle *spl, key target, merge_accumulator *result, uint32 *did_we_mis);
 
 static inline bool32
 trunk_lookup_found(merge_accumulator *result)
@@ -346,7 +346,8 @@ cache_async_result
 trunk_lookup_async(trunk_handle      *spl,
                    key                target,
                    merge_accumulator *data,
-                   trunk_async_ctxt  *ctxt);
+                   trunk_async_ctxt  *ctxt,
+                   uint32 *did_we_miss);
 platform_status
 trunk_range_iterator_init(trunk_handle         *spl,
                           trunk_range_iterator *range_itor,
@@ -354,9 +355,10 @@ trunk_range_iterator_init(trunk_handle         *spl,
                           key                   max_key,
                           key                   start_key,
                           comparison            start_type,
-                          uint64                num_tuples);
+                          uint64                num_tuples,
+                          uint32 *did_we_miss);
 void
-trunk_range_iterator_deinit(trunk_range_iterator *range_itor);
+trunk_range_iterator_deinit(trunk_range_iterator *range_itor, uint32 *did_we_miss);
 
 typedef void (*tuple_function)(key tuple_key, message value, void *arg);
 platform_status
@@ -364,7 +366,8 @@ trunk_range(trunk_handle  *spl,
             key            start_key,
             uint64         num_tuples,
             tuple_function func,
-            void          *arg);
+            void          *arg,
+            uint32 *did_we_miss);
 
 trunk_handle *
 trunk_create(trunk_config     *cfg,
@@ -372,47 +375,50 @@ trunk_create(trunk_config     *cfg,
              cache            *cc,
              task_system      *ts,
              allocator_root_id id,
-             platform_heap_id  hid);
+             platform_heap_id  hid,
+             uint32 *did_we_miss);
 void
-trunk_destroy(trunk_handle *spl);
+trunk_destroy(trunk_handle *spl, uint32 *did_we_miss);
 trunk_handle *
 trunk_mount(trunk_config     *cfg,
             allocator        *al,
             cache            *cc,
             task_system      *ts,
             allocator_root_id id,
-            platform_heap_id  hid);
+            platform_heap_id  hid,
+            uint32 *did_we_miss);
 void
-trunk_unmount(trunk_handle **spl);
+trunk_unmount(trunk_handle **spl, uint32 *did_we_miss);
 
 void
-trunk_perform_tasks(trunk_handle *spl);
+trunk_perform_tasks(trunk_handle *spl, uint32 *did_we_miss);
 
 void
-trunk_print_insertion_stats(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print_insertion_stats(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 void
-trunk_print_lookup_stats(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print_lookup_stats(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 void
 trunk_reset_stats(trunk_handle *spl);
 
 void
-trunk_print(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 
 void
-trunk_print_super_block(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print_super_block(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 
 void
 trunk_print_lookup(trunk_handle        *spl,
                    key                  target,
-                   platform_log_handle *log_handle);
+                   platform_log_handle *log_handle,
+                   uint32 *did_we_miss);
 void
-trunk_print_branches(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print_branches(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 void
 trunk_print_extent_counts(platform_log_handle *log_handle, trunk_handle *spl);
 void
-trunk_print_space_use(platform_log_handle *log_handle, trunk_handle *spl);
+trunk_print_space_use(platform_log_handle *log_handle, trunk_handle *spl, uint32 *did_we_miss);
 bool32
-trunk_verify_tree(trunk_handle *spl);
+trunk_verify_tree(trunk_handle *spl, uint32 *did_we_miss);
 
 static inline uint64
 trunk_max_key_size(trunk_handle *spl)

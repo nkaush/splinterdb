@@ -342,14 +342,15 @@ typedef struct splinterdb_iterator splinterdb_iterator;
 int
 splinterdb_iterator_init(const splinterdb     *kvs,      // IN
                          splinterdb_iterator **iter,     // OUT
-                         slice                 start_key // IN
+                         slice                 start_key,// IN
+                         uint32 *did_we_miss
 );
 
 // Deinitialize an iterator
 //
 // Failing to do this may cause hangs.
 void
-splinterdb_iterator_deinit(splinterdb_iterator *iter);
+splinterdb_iterator_deinit(splinterdb_iterator *iter, uint32 *did_we_miss);
 
 // Checks that the iterator status is OK (no errors) and that get_current()
 // will succeed. If false, there are two possibilities:
@@ -379,13 +380,13 @@ splinterdb_iterator_can_next(splinterdb_iterator *iter);
 // Precondition for calling: splinterdb_iterator_can_prev() returns TRUE
 // Any error will cause valid() == false and be visible with status()
 void
-splinterdb_iterator_prev(splinterdb_iterator *iter);
+splinterdb_iterator_prev(splinterdb_iterator *iter, uint32 *did_we_miss);
 
 // Moves the iterator to the next item.
 // Precondition for calling: splinterdb_iterator_can_next() returns TRUE
 // Any error will cause valid() == false and be visible with status()
 void
-splinterdb_iterator_next(splinterdb_iterator *iter);
+splinterdb_iterator_next(splinterdb_iterator *iter, uint32 *did_we_miss);
 
 // Sets *key and *value to the locations of the current item
 // Callers must not modify that memory pointed to by the slice
